@@ -1,6 +1,6 @@
 # grokbot-kanban
 
-A dark kanban for one owner. Bots file cards over HTTP. Only you start Cursor cloud agents, and at most 3 run at once.
+A dark kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, and annotate cards over MCP or HTTP. Only you move cards and start Cursor cloud agents, and at most 3 run at once.
 
 The board is meant to be served at `kanban.hiraoku.dev`. This repo does not deploy itself.
 
@@ -13,7 +13,7 @@ Run status comes from the [Cloud Agents API](https://cursor.com/docs/cloud-agent
 3. Copy `.env.example` to `.env.local`.
 4. Fill the variables in the next section. Leave `.env.example` empty.
 5. For a local board without Neon, set `DATABASE_URL=pglite`. The data stays in this process and disappears when it stops.
-6. For Neon, put the pooled connection string in `DATABASE_URL` and run `npm run db:migrate`.
+6. For Neon, put the pooled connection string in `DATABASE_URL` and run `npm run db:migrate`. It applies every file in `drizzle/` in order, and each file is safe to run again. Run it again after pulling a change that adds a file.
 7. Start the app with `npm run dev` and open http://localhost:3000.
 
 `npm test` uses an in-memory Postgres. It does not need Neon or a Cursor key.
@@ -38,7 +38,7 @@ Vercel Cron sends `Authorization: Bearer $CRON_SECRET` when that variable is set
 1. Import this repo as a Vercel project. Framework preset is Next.js.
 2. Add the Neon integration. It writes `DATABASE_URL`.
 3. Set `CURSOR_API_KEY`, `OWNER_PASSWORD`, `BOT_TOKEN`, `CRON_SECRET`, and optionally `STUDIO_URL` for Production. Use a separate Neon branch for Preview.
-4. Run `npm run db:migrate` against that database, or add the same SQL file as a Neon migration. `drizzle/0000_init.sql` is the schema. Do not point a Preview deployment at the production database.
+4. Run `npm run db:migrate` against that database, or add the same SQL files as Neon migrations. `drizzle/*.sql` is the schema, applied in name order. Do not point a Preview deployment at the production database.
 5. Deploy with `vercel deploy --prod`.
 
 `vercel.json` schedules `/api/cron/tick` once a day so the project can deploy on the Hobby plan. An open board polls every 4 seconds while a card is queued or occupying a slot, and a Run click starts an agent in that same request. On Hobby, a closed laptop waits until the next daily cron or the next time you open the board. On a plan that allows it, change the schedule to `* * * * *`.
@@ -48,6 +48,42 @@ Vercel Cron sends `Authorization: Bearer $CRON_SECRET` when that variable is set
 1. In the Vercel project, open Domains and add `kanban.hiraoku.dev`.
 2. At the DNS host for `hiraoku.dev`, add the record Vercel shows. For a subdomain that is usually a `CNAME` from `kanban` to `cname.vercel-dns.com`.
 3. Wait until Vercel reports the domain as valid. HTTPS is issued by Vercel.
+
+## Using the board
+
+Drag a card by its body with a mouse, a long press on a touch screen, or Space and the arrow keys. Columns that can take the card light up while you drag. Dropping inside the same column reorders it, and the order is also the queue order for agents.
+
+- Todo or In Progress with a repo starts a run, the same as Run.
+- Todo without a repo parks the card there and says so.
+- In Review only fills from agent PRs. A running card has to be stopped before it moves.
+
+Each card shows the bot that filed it and who holds it. Click the assignee row to change it, or the title to edit everything. Click an avatar in the header to see one member's cards, or Unassigned. `/` focuses search and `n` opens a new card. The board refreshes every 15 seconds while it is open, and every 4 seconds while an agent is queued or running.
+
+`/?card=<id>` scrolls to a card and highlights it. MCP results carry this link so a bot's report can point at the card.
+
+## Grok Bot over MCP
+
+`/api/mcp` is a stateless MCP server over Streamable HTTP. It takes `Authorization: Bearer $BOT_TOKEN`, the same token as the bot API.
+
+Grok Bot has no settings form for custom servers. You ask a Bot in chat to add one, and for a server that needs a secret it recommends Remote HTTPS. **Bots & MCP → Connect Grok Bot** on the board has the message to send, with this deployment's URL filled in. When the Bot asks for the key, give the header name `Authorization` and the value `Bearer <BOT_TOKEN>`. Connectors are account-wide in Grok Bot, so one server entry serves every Bot.
+
+Because the connector is shared, the board cannot tell Bots apart by token. Every tool takes a `bot` argument instead: the calling Bot's own name. A new name joins the roster with a generated icon. Set a real icon in **Bots & MCP → Roster**, or let the Bot call `update_my_profile` with an emoji or an https image URL.
+
+| Tool | Writes | Purpose |
+| --- | --- | --- |
+| `board_summary` | no | Counts per column, running agents, and the caller's cards |
+| `list_cards` | no | Filter by column, assignee (`me`, `owner`, a bot name), unassigned, or text |
+| `get_card` | no | One card in full. Takes the UUID or the short id shown on the card |
+| `list_bots` | no | Roster with roles and load |
+| `create_card` | yes | File a card in Inbox. `externalId` makes retries return the same card |
+| `update_card` | yes | Edit content. It has no column field |
+| `add_note` | yes | Append a signed, timestamped line to the notes |
+| `assign_card` | yes | Add, remove, or set assignees. With nothing given, it assigns the caller |
+| `update_my_profile` | yes | Name, role, icon, color |
+
+Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask. No tool moves a card or starts a Cursor agent.
+
+The same endpoint works from the xAI API as a remote MCP tool. Pass `server_url`, `server_label`, `authorization` with the token, and `allowed_tools` to keep a script read-only.
 
 ## How runs work
 
@@ -63,7 +99,9 @@ If the create call times out or returns a server error, the card stays in progre
 
 ## Bot API
 
-Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` and writes nothing. The bot can create and edit card content. It cannot move a card or start a run. A body with any other field returns `400`.
+Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` and writes nothing. The bot can create and edit card content, including `assignees`. It cannot move a card or start a run. A body with any other field returns `400`.
+
+Add `X-Bot-Name` with the bot's name, URL-encoded if it is not ASCII, to record who filed or edited a card. `assignees` takes bot names, `owner`, and `me` for the caller.
 
 ```bash
 curl -X POST https://kanban.hiraoku.dev/api/bot/cards \
