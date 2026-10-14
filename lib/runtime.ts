@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { neon } from "@neondatabase/serverless";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
 import { openBoard, type BoardHandle } from "./board";
 import { createCursorClient } from "./cursor";
+import { migrationSql } from "./migrations";
 import { createStore } from "./store";
 import * as schema from "./schema";
 
@@ -44,7 +43,8 @@ function required(source: NodeJS.ProcessEnv, name: string): string {
 	return value;
 }
 
-const cache: { board?: BoardHandle } = {};
+// Next bundles each route separately, so a module-level cache would give every route its own local PGlite.
+const cache = ((globalThis as { __grokbotKanban?: { board?: BoardHandle } }).__grokbotKanban ??= {});
 
 export function getBoard(): BoardHandle {
 	if (cache.board) return cache.board;
@@ -71,31 +71,25 @@ function lazyPgliteBoard(cursor: ReturnType<typeof createCursorClient>): BoardHa
 		ready ??= openLocalPglite(cursor);
 		return ready;
 	};
+	// Every capability view forwards each call to the real board once PGlite is ready.
+	const defer = <T extends object>(pick: (board: BoardHandle) => T): T =>
+		new Proxy({} as T, {
+			get: (_target, key) =>
+				async (...args: unknown[]) => {
+					const target = pick(await open()) as Record<PropertyKey, (...rest: unknown[]) => unknown>;
+					return target[key]?.(...args);
+				},
+		});
 	return {
-		owner(cap) {
-			return {
-				view: async () => (await open()).owner(cap).view(),
-				sync: async () => (await open()).owner(cap).sync(),
-				execute: async (command) => (await open()).owner(cap).execute(command),
-			};
-		},
-		bot(cap) {
-			return {
-				create: async (input) => (await open()).bot(cap).create(input),
-				patch: async (id, patch) => (await open()).bot(cap).patch(id, patch),
-				get: async (id) => (await open()).bot(cap).get(id),
-			};
-		},
-		cron(cap) {
-			return { sync: async () => (await open()).cron(cap).sync() };
-		},
+		owner: (cap) => defer((board) => board.owner(cap)),
+		bot: (cap) => defer((board) => board.bot(cap)),
+		cron: (cap) => defer((board) => board.cron(cap)),
 	};
 }
 
 async function openLocalPglite(cursor: ReturnType<typeof createCursorClient>): Promise<BoardHandle> {
 	const client = new PGlite();
-	const sql = readFileSync(path.join(process.cwd(), "drizzle/0000_init.sql"), "utf8");
-	await client.exec(sql);
+	await client.exec(migrationSql());
 	const db = drizzlePglite(client, { schema });
 	return openBoard({
 		store: createStore(db as never),

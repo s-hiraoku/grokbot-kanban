@@ -7,6 +7,7 @@ function card(state: Card["state"]): Card {
 	return {
 		id: "11111111-1111-4111-8111-111111111111" as CardId,
 		createdAt: 0 as Instant,
+		createdBy: null,
 		rank: "0000000000001000",
 		version: 0,
 		content: {
@@ -19,6 +20,7 @@ function card(state: Card["state"]): Card {
 			priority: "normal",
 			kind: { type: "text" },
 			screening: null,
+			assignees: [],
 		},
 		state,
 	};

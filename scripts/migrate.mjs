@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { neon } from "@neondatabase/serverless";
 
 const url = process.env.DATABASE_URL;
@@ -8,14 +8,17 @@ if (!url || url === "pglite") {
 }
 
 const sql = neon(url);
-const text = readFileSync(new URL("../drizzle/0000_init.sql", import.meta.url), "utf8");
-const statements = text
-	.split(";")
-	.map((statement) => statement.trim())
-	.filter(Boolean);
+const dir = new URL("../drizzle/", import.meta.url);
+const files = readdirSync(dir).filter((name) => name.endsWith(".sql")).sort();
 
-for (const statement of statements) {
-	await sql.query(statement);
+for (const file of files) {
+	const text = readFileSync(new URL(file, dir), "utf8");
+	const statements = text
+		.split(";")
+		.map((statement) => statement.trim())
+		.filter(Boolean);
+	for (const statement of statements) {
+		await sql.query(statement);
+	}
+	console.log(`Applied drizzle/${file}`);
 }
-
-console.log("Applied drizzle/0000_init.sql");

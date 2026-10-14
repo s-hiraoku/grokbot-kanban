@@ -1,5 +1,6 @@
 import type { CardId } from "@/lib/domain";
-import { badRequest, json, notFound, readJson, requireBot } from "@/lib/http";
+import { BoardInputError } from "@/lib/board";
+import { badRequest, botNameFrom, json, notFound, readJson, requireBot } from "@/lib/http";
 import { BadRequest, brandPatch, contentPatchSchema, parseBody } from "@/lib/parse";
 import { env, getBoard } from "@/lib/runtime";
 
@@ -25,11 +26,12 @@ export async function PATCH(req: Request, context: Context): Promise<Response> {
 	const { id } = await context.params;
 	try {
 		const patch = brandPatch(parseBody(contentPatchSchema, await readJson(req)));
-		const card = await getBoard().bot(bot).patch(id as CardId, patch);
+		const card = await getBoard().bot(bot).patch(id as CardId, patch, botNameFrom(req));
 		if (!card) return notFound();
 		return json({ card });
 	} catch (error) {
 		if (error instanceof BadRequest) return badRequest();
+		if (error instanceof BoardInputError) return badRequest(error.message);
 		throw error;
 	}
 }

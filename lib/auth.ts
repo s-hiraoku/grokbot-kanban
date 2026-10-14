@@ -1,9 +1,10 @@
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 
-const capability: unique symbol = Symbol("capability");
-const OWNER = Symbol("owner");
-const BOT = Symbol("bot");
-const CRON = Symbol("cron");
+// Symbol.for keeps capabilities equal when Next loads this module once per route bundle.
+const capability: unique symbol = Symbol.for("grokbot-kanban.capability") as never;
+const OWNER = Symbol.for("grokbot-kanban.owner");
+const BOT = Symbol.for("grokbot-kanban.bot");
+const CRON = Symbol.for("grokbot-kanban.cron");
 
 export type Owner = { readonly [capability]: typeof OWNER };
 export type Bot = { readonly [capability]: typeof BOT };
