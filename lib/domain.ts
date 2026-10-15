@@ -31,7 +31,11 @@ export const COLUMNS = [
 ] as const;
 
 export type Column = (typeof COLUMNS)[number]["id"];
-export type ParkColumn = Exclude<Column, "inProgress" | "inReview">;
+/**
+ * Any column a card can sit in without an agent. In Progress and In Review are included so work a
+ * bot or the owner does by hand can be tracked there; a move never starts or stops a run.
+ */
+export type ParkColumn = Column;
 
 export type Priority = "low" | "normal" | "high";
 export type CardKind = { type: "text" } | { type: "voice"; seconds: number };
@@ -415,7 +419,7 @@ export function actionFor(state: CardState): CardAction {
 
 export function moveTargetsFor(state: CardState): readonly ParkColumn[] {
 	if (isSlotHolder(state)) return [];
-	return ["inbox", "todo", "done", "wontDo"];
+	return COLUMNS.map((column) => column.id);
 }
 
 export function agentHref(state: CardState): string | null {

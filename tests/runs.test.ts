@@ -92,9 +92,18 @@ test("a dropdown move to Todo does not call Cursor", async () => {
 	expect(cardIn(body.board, card.id)).toMatchObject({ column: "todo", card: { pill: null, hint: null } });
 	expect(holder.current!.cursor.created).toHaveLength(before);
 
-	const illegal = await command(ownerRequest(holder.current!, { type: "move", cardId: card.id, to: "inProgress" }));
-	expect(illegal.status).toBe(400);
+	// Moving into In Progress tracks hand work. It never starts an agent, even with a repo set.
+	const manual = await command(ownerRequest(holder.current!, { type: "move", cardId: card.id, to: "inProgress" }));
+	expect(manual.status).toBe(200);
+	const manualBody = (await manual.json()) as { board: Parameters<typeof cardIn>[0] & { agents: { running: number } } };
+	expect(cardIn(manualBody.board, card.id)).toMatchObject({ column: "inProgress", card: { pill: null } });
+	expect(manualBody.board.agents.running).toBe(0);
+	const tick = await cron(cronRequest(CRON_SECRET));
+	expect(tick.status).toBe(200);
 	expect(holder.current!.cursor.created).toHaveLength(before);
+
+	const unknown = await command(ownerRequest(holder.current!, { type: "move", cardId: card.id, to: "archive" }));
+	expect(unknown.status).toBe(400);
 });
 
 test("the fourth run waits, then moves to In Review when a PR appears", async () => {

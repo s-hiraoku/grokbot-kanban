@@ -107,7 +107,7 @@ const runRecord = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("launchLost"), launchId: z.string(), endedAt: z.number() }),
 ]);
 const stateSchema = z.discriminatedUnion("kind", [
-	z.object({ kind: z.literal("idle"), column: z.enum(["inbox", "todo", "done", "wontDo"]), last: runRecord.nullable() }),
+	z.object({ kind: z.literal("idle"), column: z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]), last: runRecord.nullable() }),
 	z.object({ kind: z.literal("queued"), launch, last: runRecord.nullable() }),
 	z.object({ kind: z.literal("starting"), launch, slot, claimedAt: z.number() }),
 	z.object({ kind: z.literal("running"), launch, slot, agent: agentRef, cursorStatus: z.string() }),

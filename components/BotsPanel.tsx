@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
+import type { ToastMessage } from "@/lib/notify";
 import type { BotView } from "@/lib/view";
 
 const PALETTE = ["#7aa2ff", "#3dd68c", "#e2b340", "#e06c75", "#c678dd", "#56b6c2", "#f0883e", "#a3be8c"];
@@ -13,10 +14,12 @@ export default function BotsPanel({
 	bots,
 	onClose,
 	send,
+	notify,
 }: {
 	bots: readonly BotView[];
 	onClose: () => void;
 	send: (command: Command) => Promise<boolean>;
+	notify: (message: ToastMessage) => void;
 }) {
 	const [tab, setTab] = useState<"roster" | "connect">(bots.length ? "roster" : "connect");
 	const [draft, setDraft] = useState<Draft | null>(null);
@@ -78,7 +81,7 @@ export default function BotsPanel({
 						{bots.length === 0 ? <p className="muted">No bots yet. A Grok Bot joins the roster the first time it calls the board with its name.</p> : null}
 						{bots.map((bot) =>
 							draft?.id === bot.id ? (
-								<BotForm key={bot.id} draft={draft} setDraft={setDraft} onSave={async () => (await save(draft)) && setDraft(null)} onCancel={() => setDraft(null)} />
+								<BotForm key={bot.id} draft={draft} setDraft={setDraft} onSave={async () => (await save(draft)) && setDraft(null)} onCancel={() => setDraft(null)} notify={notify} />
 							) : (
 								<div key={bot.id} className="bot-row">
 									<MemberAvatar member={bot} size={34} />
@@ -111,7 +114,7 @@ export default function BotsPanel({
 							),
 						)}
 						{draft?.id === null ? (
-							<BotForm draft={draft} setDraft={setDraft} onSave={async () => (await save(draft)) && setDraft(null)} onCancel={() => setDraft(null)} />
+							<BotForm draft={draft} setDraft={setDraft} onSave={async () => (await save(draft)) && setDraft(null)} onCancel={() => setDraft(null)} notify={notify} />
 						) : (
 							<button type="button" className="ghost" onClick={() => setDraft({ id: null, name: "", role: "", avatar: "", color: PALETTE[bots.length % PALETTE.length] ?? PALETTE[0]!, original: "" })}>
 								＋ Add bot
@@ -177,11 +180,13 @@ function BotForm({
 	setDraft,
 	onSave,
 	onCancel,
+	notify,
 }: {
 	draft: Draft;
 	setDraft: (draft: Draft) => void;
 	onSave: () => void;
 	onCancel: () => void;
+	notify: (message: ToastMessage) => void;
 }) {
 	const preview = {
 		id: draft.id ?? "new",
@@ -231,7 +236,7 @@ function BotForm({
 							if (!file) return;
 							const avatar = await shrinkImage(file).catch(() => null);
 							if (avatar) setDraft({ ...draft, avatar });
-							else window.alert("That image could not be read. Try a PNG or JPEG.");
+							else notify({ text: "That image could not be read. Try a PNG, JPEG, WebP or GIF.", tone: "error" });
 						}}
 					/>
 				</label>

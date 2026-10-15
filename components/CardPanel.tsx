@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { AvatarStack, MemberAvatar } from "@/components/Avatar";
+import { actionBlocked } from "@/lib/dropRules";
 import type { CardView } from "@/lib/view";
 
 export type CardHandlers = {
@@ -9,6 +10,8 @@ export type CardHandlers = {
 	onStop: () => void;
 	onOpen: () => void;
 	onDelete: () => void;
+	/** Explains, in a warning toast, why an action did nothing. */
+	onBlocked: (reason: string) => void;
 };
 
 type Props = {
@@ -101,9 +104,14 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 					<button
 						type="button"
 						className={`card-action ${card.action.command}`}
-						disabled={!card.action.enabled}
+						aria-disabled={!card.action.enabled || undefined}
 						data-no-dnd
-						onClick={() => (card.action.command === "stop" ? handlers.onStop() : handlers.onRun())}
+						onClick={() => {
+							const reason = actionBlocked(card, card.action.command);
+							if (reason) handlers.onBlocked(reason);
+							else if (card.action.command === "stop") handlers.onStop();
+							else handlers.onRun();
+						}}
 					>
 						{card.action.label}
 					</button>
@@ -166,11 +174,13 @@ function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }
 						type="button"
 						role="menuitem"
 						className="danger-item"
-						disabled={live}
+						aria-disabled={live || undefined}
 						title={live ? "Stop the agent before deleting this card." : undefined}
 						onClick={() => {
 							setOpen(false);
-							handlers.onDelete();
+							const reason = actionBlocked(card, "delete");
+							if (reason) handlers.onBlocked(reason);
+							else handlers.onDelete();
 						}}
 					>
 						Delete

@@ -108,7 +108,7 @@ export const botProfileSchema = z
 
 const columnSchema = z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]);
 
-const parkColumn = z.enum(["inbox", "todo", "done", "wontDo"]);
+const parkColumn = columnSchema;
 
 export const ownerCommandSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("create"), content: contentSchema }).strict(),
@@ -187,5 +187,5 @@ export function brandPatch(patch: z.infer<typeof contentPatchSchema>): ContentPa
 }
 
 export function isParkColumn(value: string): value is ParkColumn {
-	return value === "inbox" || value === "todo" || value === "done" || value === "wontDo";
+	return columnSchema.safeParse(value).success;
 }
