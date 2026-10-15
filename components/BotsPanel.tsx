@@ -79,8 +79,10 @@ export default function BotsPanel({
 									<div className="bot-info">
 										<strong>{bot.name}</strong>
 										<span className="muted small">{bot.role || "No role yet"}</span>
-										<span className="muted small">
-											{bot.assigned} assigned · {bot.created} filed · {bot.lastSeen ? `seen ${bot.lastSeen} ago` : "never seen"}
+										<span className="bot-stats">
+											<span>{bot.assigned} assigned</span>
+											<span>{bot.created} filed</span>
+											<span>{bot.lastSeen === null ? "Not seen yet" : bot.lastSeen === "just now" ? "Seen just now" : `Seen ${bot.lastSeen} ago`}</span>
 										</span>
 									</div>
 									<button

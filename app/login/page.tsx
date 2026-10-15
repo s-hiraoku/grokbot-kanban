@@ -10,15 +10,15 @@ export default async function LoginPage({
 	return (
 		<main className="login">
 			<form className="login-card" method="post" action="/api/auth/login">
-				<p className="eyebrow">Grok Bot</p>
-				<h1>Sign in</h1>
+				<p className="login-brand">Grok Bot</p>
+				<h1>Sign in to the board</h1>
 				<p className="muted">This board is for the studio owner.</p>
 				<label>
 					Password
 					<input name="password" type="password" autoComplete="current-password" required />
 				</label>
 				{failed ? <p className="error">That password did not match.</p> : null}
-				<button type="submit">Enter</button>
+				<button type="submit" className="primary">Sign in</button>
 			</form>
 		</main>
 	);

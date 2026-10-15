@@ -154,8 +154,10 @@ export function memberOf(id: MemberId, bots: readonly BotProfile[]): MemberView 
 
 export function initialsOf(name: string): string {
 	const words = name.trim().split(/[\s_-]+/).filter(Boolean);
-	if (words.length >= 2 && /^[A-Za-z0-9]/.test(words[0] ?? "") && /^[A-Za-z0-9]/.test(words[1] ?? "")) {
-		return `${Array.from(words[0] ?? "")[0] ?? ""}${Array.from(words[1] ?? "")[0] ?? ""}`.toUpperCase();
+	const last = words[words.length - 1] ?? "";
+	if (words.length >= 2 && /^[A-Za-z0-9]/.test(words[0] ?? "") && /^[A-Za-z0-9]/.test(last)) {
+		// "Chief of Staff" reads as CS, not CO.
+		return `${Array.from(words[0] ?? "")[0] ?? ""}${Array.from(last)[0] ?? ""}`.toUpperCase();
 	}
 	const chars = Array.from(name.trim());
 	if (chars.length === 0) return "?";

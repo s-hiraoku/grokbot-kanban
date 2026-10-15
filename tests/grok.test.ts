@@ -58,7 +58,9 @@ test("MCP needs the bot token and speaks JSON-RPC", async () => {
 
 	const unknown = await rpc("does/not/exist");
 	expect(unknown.body!.error.code).toBe(-32601);
-	expect((await mcpGet()).status).toBe(405);
+	// Without the token a GET fallback reports the real problem, not a method error.
+	expect((await mcpGet(new Request("http://localhost:3000/api/mcp"))).status).toBe(401);
+	expect((await mcpGet(new Request("http://localhost:3000/api/mcp", { headers: { Authorization: `Bearer ${BOT_TOKEN}` } }))).status).toBe(405);
 });
 
 test("a bot files, claims, and annotates a card through MCP", async () => {
