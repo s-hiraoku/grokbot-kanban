@@ -12,6 +12,7 @@ const { POST: mcp, GET: mcpGet } = await import("@/app/api/mcp/route");
 const { POST: createCard } = await import("@/app/api/bot/cards/route");
 const { POST: command } = await import("@/app/api/owner/commands/route");
 const { POST: sync } = await import("@/app/api/owner/sync/route");
+const { GET: avatarImage } = await import("@/app/api/avatar/[id]/route");
 
 beforeEach(async () => {
 	holder.current = await boot();
@@ -204,4 +205,31 @@ test("the owner deletes a card, but not one with a live run", async () => {
 
 	const tools = (await rpc("tools/list")).body!.result.tools as { name: string }[];
 	expect(tools.map((tool) => tool.name).some((name) => name.includes("delete"))).toBe(false);
+});
+
+test("an uploaded icon is stored once and served from its own URL", async () => {
+	const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+	const saved = await command(ownerRequest(holder.current!, { type: "saveBot", id: null, profile: { name: "Pixel", role: "", avatar: png, color: null } }));
+	expect(saved.status).toBe(200);
+	const bot = ((await saved.json()) as any).board.bots.find((item: any) => item.name === "Pixel");
+	expect(bot.avatar).toMatch(/^\/api\/avatar\/pixel\?v=/);
+
+	// Saving again without an avatar field keeps the image.
+	await command(ownerRequest(holder.current!, { type: "saveBot", id: bot.id, profile: { name: "Pixel", role: "Pixels", color: null } }));
+	expect((await boardView()).bots.find((item: any) => item.id === bot.id).avatar).toBe(bot.avatar);
+
+	const image = await avatarImage(new Request(`http://localhost:3000${bot.avatar}`, { headers: { Cookie: holder.current!.cookie } }), { params: Promise.resolve({ id: bot.id }) });
+	expect(image.status).toBe(200);
+	expect(image.headers.get("Content-Type")).toBe("image/png");
+	expect((await image.arrayBuffer()).byteLength).toBeGreaterThan(20);
+	const anonymous = await avatarImage(new Request(`http://localhost:3000${bot.avatar}`), { params: Promise.resolve({ id: bot.id }) });
+	expect(anonymous.status).toBe(401);
+
+	const html = await command(ownerRequest(holder.current!, { type: "saveBot", id: bot.id, profile: { name: "Pixel", role: "", avatar: "data:text/html;base64,PHNjcmlwdD4=", color: null } }));
+	expect(html.status).toBe(400);
+
+	const self = await call("update_my_profile", { bot: "Selfie", avatar: png });
+	expect(self.avatar).toMatch(/^http:\/\/localhost:3000\/api\/avatar\/selfie\?v=/);
+	const tooBig = await rpc("tools/call", { name: "update_my_profile", arguments: { bot: "Selfie", avatar: `data:image/png;base64,${"A".repeat(130_000)}` } });
+	expect(tooBig.body!.error ?? tooBig.body!.result.isError).toBeTruthy();
 });

@@ -40,7 +40,7 @@ import {
 
 export type NewCardInput = { externalId: string | null; content: CardContent };
 
-export type BotProfileInput = { name: string; role: string; avatar: string | null; color: string | null };
+export type BotProfileInput = { name: string; role: string; avatar?: string | null; color: string | null };
 
 export type OwnerCommand =
 	| { type: "create"; content: CardContent }
@@ -72,6 +72,8 @@ export type OwnerBoard = {
 	view(): Promise<BoardView>;
 	sync(): Promise<BoardView>;
 	execute(command: OwnerCommand): Promise<CommandResult>;
+	/** The stored icon of a bot, for the image route. */
+	avatar(botId: string): Promise<string | null>;
 };
 
 export type CardFilter = {
@@ -139,6 +141,7 @@ type Applied =
 export function openBoard(deps: BoardDeps): BoardHandle {
 	const ownerApi: OwnerBoard = {
 		view: () => viewOf(deps),
+		avatar: async (botId) => (await deps.store.bot(botId))?.avatar ?? null,
 		sync: async () => {
 			await syncOnce(deps);
 			return viewOf(deps);
@@ -476,7 +479,7 @@ async function saveBot(deps: BoardDeps, id: string | null, profile: BotProfileIn
 	const patch = cleanProfilePatch({
 		name,
 		role: profile.role,
-		avatar: profile.avatar || null,
+		...(profile.avatar === undefined ? {} : { avatar: profile.avatar || null }),
 		color: profile.color ?? colorFor(name),
 	});
 	if (id) {

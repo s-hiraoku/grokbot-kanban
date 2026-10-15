@@ -677,6 +677,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .bot-form { display: grid; grid-template-columns: auto 1fr 1fr 1fr; gap: 10px; align-items: end; border: 1px solid var(--amber); border-radius: 12px; padding: 12px; }
 .bot-form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 700; }
 .bot-form .palette, .bot-form .row { grid-column: 2 / -1; display: flex; gap: 6px; }
+.icon-field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 700; }
+.icon-picked { display: flex; align-items: center; gap: 8px; padding: 8px 0; color: var(--text); font-weight: 400; }
+.upload { position: relative; display: inline-block; text-align: center; font-weight: 400; color: var(--text); cursor: pointer; }
+.upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.upload:focus-within { outline: 2px solid var(--amber); outline-offset: 2px; }
 .swatch { width: 24px; height: 24px; border-radius: 99px; border: 2px solid transparent; cursor: pointer; padding: 0; }
 .swatch.on { border-color: var(--text); }
 .connect ol { padding-left: 20px; display: grid; gap: 14px; margin: 0 0 14px; font-size: 14px; line-height: 1.65; }

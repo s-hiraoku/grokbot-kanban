@@ -7,7 +7,7 @@ import type { BotView } from "@/lib/view";
 
 const PALETTE = ["#7aa2ff", "#3dd68c", "#e2b340", "#e06c75", "#c678dd", "#56b6c2", "#f0883e", "#a3be8c"];
 
-type Draft = { id: string | null; name: string; role: string; avatar: string; color: string };
+type Draft = { id: string | null; name: string; role: string; avatar: string; color: string; original: string };
 
 export default function BotsPanel({
 	bots,
@@ -43,6 +43,11 @@ export default function BotsPanel({
 - 作業が進んだら move_card でカードを動かし、reason に理由を書く（完了は done、見送りは wontDo、着手可能になったら todo）
 - Cursor エージェントの起動と停止はオーナーの承認事項なので、頼まれても行わない。待機中・実行中のカードは動かさない
 まだ Routine は作らないでください。`;
+	const iconMessage = `あなたのプロフィール画像を kanban に登録してください。
+1. 下に添付した画像（あなたの Edit Profile のアイコンと同じもの）をファイルに保存する
+2. コンピューターで正方形に切り抜いて 128px に縮小し、PNG か WebP にする（90 KB 未満）
+3. base64 にして「data:image/png;base64,...」の形にし、kanban の update_my_profile の avatar に渡す（bot 引数はあなたの Bot 名）
+終わったら、返ってきた avatar の URL を教えてください。`;
 	const apiSnippet = `{
   "type": "mcp",
   "server_label": "kanban",
@@ -89,7 +94,7 @@ export default function BotsPanel({
 									<button
 										type="button"
 										className="ghost small"
-										onClick={() => setDraft({ id: bot.id, name: bot.name, role: bot.role, avatar: bot.avatar ?? "", color: bot.color })}
+										onClick={() => setDraft({ id: bot.id, name: bot.name, role: bot.role, avatar: bot.avatar ?? "", color: bot.color, original: bot.avatar ?? "" })}
 									>
 										Edit
 									</button>
@@ -108,7 +113,7 @@ export default function BotsPanel({
 						{draft?.id === null ? (
 							<BotForm draft={draft} setDraft={setDraft} onSave={async () => (await save(draft)) && setDraft(null)} onCancel={() => setDraft(null)} />
 						) : (
-							<button type="button" className="ghost" onClick={() => setDraft({ id: null, name: "", role: "", avatar: "", color: PALETTE[bots.length % PALETTE.length] ?? PALETTE[0]! })}>
+							<button type="button" className="ghost" onClick={() => setDraft({ id: null, name: "", role: "", avatar: "", color: PALETTE[bots.length % PALETTE.length] ?? PALETTE[0]!, original: "" })}>
 								＋ Add bot
 							</button>
 						)}
@@ -133,6 +138,10 @@ export default function BotsPanel({
 								Optional: save the working rules as a Skill so every Bot uses the board the same way.
 								<CopyBlock text={skillMessage} />
 							</li>
+							<li>
+								Optional: let the Bot set its own icon. Grok Bot does not share profile images with connectors, so attach the Bot's icon image to this message. You can also upload it yourself under Roster.
+								<CopyBlock text={iconMessage} />
+							</li>
 						</ol>
 						<h3>Endpoint</h3>
 						<CopyBlock text={mcpUrl} />
@@ -152,7 +161,13 @@ export default function BotsPanel({
 		return send({
 			type: "saveBot",
 			id: value.id,
-			profile: { name: value.name, role: value.role, avatar: value.avatar.trim() || null, color: value.color },
+			// An unchanged icon is left out so an uploaded image is kept as stored.
+			profile: {
+				name: value.name,
+				role: value.role,
+				...(value.id && value.avatar === value.original ? {} : { avatar: value.avatar.trim() || null }),
+				color: value.color,
+			},
 		});
 	}
 }
@@ -193,10 +208,34 @@ function BotForm({
 				Role
 				<input value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value })} maxLength={200} lang="ja" placeholder="Bug Reproduction" />
 			</label>
-			<label>
-				Icon
-				<input value={draft.avatar} onChange={(event) => setDraft({ ...draft, avatar: event.target.value })} placeholder="🐞 or https://…" />
-			</label>
+			<div className="icon-field">
+				<span className="icon-label">Icon</span>
+				{isImage(draft.avatar) ? (
+					<span className="icon-picked">
+						Image set
+						<button type="button" className="link" onClick={() => setDraft({ ...draft, avatar: "" })}>
+							Remove
+						</button>
+					</span>
+				) : (
+					<input aria-label="Icon" value={draft.avatar} onChange={(event) => setDraft({ ...draft, avatar: event.target.value })} placeholder="🐞 or https://…" />
+				)}
+				<label className="ghost small upload">
+					Upload image
+					<input
+						type="file"
+						accept="image/png,image/jpeg,image/webp,image/gif"
+						onChange={async (event) => {
+							const file = event.target.files?.[0];
+							event.target.value = "";
+							if (!file) return;
+							const avatar = await shrinkImage(file).catch(() => null);
+							if (avatar) setDraft({ ...draft, avatar });
+							else window.alert("That image could not be read. Try a PNG or JPEG.");
+						}}
+					/>
+				</label>
+			</div>
 			<div className="palette" role="radiogroup" aria-label="Color">
 				{PALETTE.map((color) => (
 					<button
@@ -244,4 +283,23 @@ function CopyBlock({ text }: { text: string }) {
 			</button>
 		</div>
 	);
+}
+
+function isImage(value: string): boolean {
+	return /^(https:\/\/|\/api\/avatar\/|data:image\/)/.test(value);
+}
+
+/** Crops to a square and scales to 128px, so a saved icon is a few KB however large the upload was. */
+async function shrinkImage(file: File): Promise<string> {
+	const bitmap = await createImageBitmap(file);
+	const side = Math.min(bitmap.width, bitmap.height);
+	const canvas = document.createElement("canvas");
+	canvas.width = 128;
+	canvas.height = 128;
+	const context = canvas.getContext("2d");
+	if (!context) throw new Error("no canvas");
+	context.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 128, 128);
+	bitmap.close();
+	const webp = canvas.toDataURL("image/webp", 0.86);
+	return webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/png");
 }

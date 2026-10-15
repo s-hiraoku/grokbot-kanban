@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BoardInputError, type BotBoard } from "./board";
 import { COLUMNS, type CardId, type ParkColumn } from "./domain";
-import { BadRequest, brandPatch, contentFromNewCard, contentPatchSchema, memberRefsSchema, newCardBodySchema } from "./parse";
+import { AVATAR_DATA_MAX, BadRequest, brandPatch, isAvatarData, contentFromNewCard, contentPatchSchema, memberRefsSchema, newCardBodySchema } from "./parse";
 import type { BotCardView } from "./view";
 
 /**
@@ -167,7 +167,7 @@ const tools = {
 	},
 	update_my_profile: {
 		description:
-			"Set how you appear on the board: display name, one-line role, and icon. avatar is an https image URL or a single emoji. color is #rrggbb.",
+			"Set how you appear on the board: display name, one-line role, and icon. avatar is a data URL of your profile image (data:image/png;base64,... or jpeg/webp/gif, square, about 128px, under 90 KB), an https image URL, or a single emoji. color is #rrggbb.",
 		readOnly: false,
 		input: z
 			.object({
@@ -177,17 +177,21 @@ const tools = {
 				avatar: z
 					.string()
 					.trim()
-					.max(500)
+					.max(AVATAR_DATA_MAX)
 					.nullable()
 					.optional()
-					.refine((value) => !value || value.startsWith("https://") || Array.from(value).length <= 4, "avatar must be an https URL or a short emoji"),
+					.refine(
+						(value) => !value || isAvatarData(value) || (value.length <= 500 && (value.startsWith("https://") || Array.from(value).length <= 4)),
+						"avatar must be a base64 image data URL under 90 KB, an https URL, or a short emoji",
+					),
 				color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 			})
 			.strict(),
 		run: async (ctx: McpContext, args: { bot: string; name?: string; role?: string; avatar?: string | null; color?: string }) => {
 			const { bot: actor, ...patch } = args;
 			const profile = await ctx.board.updateProfile(actor, patch);
-			return { id: profile.id, name: profile.name, role: profile.role, avatar: profile.avatar, color: profile.color };
+			// An uploaded image comes back as its board URL, not the whole data URL.
+			return { id: profile.id, name: profile.name, role: profile.role, avatar: profile.avatar ? new URL(profile.avatar, ctx.boardUrl).toString() : null, color: profile.color };
 		},
 	},
 } as const;

@@ -3,7 +3,7 @@
 import type { MemberView } from "@/lib/view";
 
 export function MemberAvatar({ member, size = 22, ring = false }: { member: MemberView; size?: number; ring?: boolean }) {
-	const isImage = member.avatar?.startsWith("https://") ?? false;
+	const isImage = member.avatar ? /^(https:\/\/|\/api\/avatar\/|data:image\/)/.test(member.avatar) : false;
 	const glyph = member.avatar && !isImage ? member.avatar : member.initials;
 	const className = `avatar ${member.kind}${ring ? " ring" : ""}`;
 	const style = {
