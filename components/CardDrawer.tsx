@@ -277,6 +277,23 @@ export default function CardDrawer({
 						{card && !dirty ? "Close" : "Cancel"}
 					</button>
 					{card && (card.column === "inProgress" || card.column === "inReview") ? <span className="muted small">Edits do not change a run already started.</span> : null}
+					{card ? (
+						<button
+							type="button"
+							className="ghost danger delete"
+							disabled={busy || card.pill !== null}
+							title={card.pill ? "Stop the agent before deleting this card." : "Delete this card"}
+							onClick={async () => {
+								if (!window.confirm(`Delete “${card.title}”? This cannot be undone.`)) return;
+								setBusy(true);
+								const ok = await send({ type: "deleteCard", cardId: card.id });
+								setBusy(false);
+								if (ok) onClose();
+							}}
+						>
+							Delete
+						</button>
+					) : null}
 				</footer>
 			</form>
 		</div>

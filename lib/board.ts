@@ -50,7 +50,8 @@ export type OwnerCommand =
 	| { type: "stop"; cardId: CardId }
 	| { type: "drop"; cardId: CardId; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: BotProfileInput }
-	| { type: "deleteBot"; id: string };
+	| { type: "deleteBot"; id: string }
+	| { type: "deleteCard"; cardId: CardId };
 
 export type CommandResult = {
 	board: BoardView;
@@ -391,6 +392,16 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 	const members = (refs: readonly string[]) =>
 		resolveMembers(deps.store, refs, { actor: null, now: deps.now(), autoCreate: false });
 	if (command.type === "saveBot") return saveBot(deps, command.id, command.profile);
+	if (command.type === "deleteCard") {
+		const card = await deps.store.get(command.cardId);
+		if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
+		// A queued or running card is tied to a slot and maybe a live agent. Stop it first.
+		if (card.state.kind !== "idle" && card.state.kind !== "review") {
+			throw new BoardInputError("Stop the agent before deleting this card.");
+		}
+		await deps.store.deleteCard(card.id);
+		return { board: await viewOf(deps), notice: "Card deleted", error: null };
+	}
 	if (command.type === "deleteBot") {
 		const removed = await deps.store.deleteBot(command.id);
 		if (!removed) return { board: await viewOf(deps), notice: null, error: "not_found" };

@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, type HTMLAttributes } from "react";
+import { forwardRef, useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { AvatarStack, MemberAvatar } from "@/components/Avatar";
 import type { CardView } from "@/lib/view";
 
@@ -8,6 +8,7 @@ export type CardHandlers = {
 	onRun: () => void;
 	onStop: () => void;
 	onOpen: () => void;
+	onDelete: () => void;
 };
 
 type Props = {
@@ -63,6 +64,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 						{card.pill.label === "running" ? "Running" : "Waiting for a slot"}
 					</span>
 				) : null}
+				{overlay ? null : <CardMenu card={card} handlers={handlers} />}
 			</div>
 			{card.body ? (
 				<p className="body" lang="ja">
@@ -112,3 +114,69 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 });
 
 export default CardPanel;
+
+function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
+	const [open, setOpen] = useState(false);
+	const box = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!open) return;
+		const close = (event: PointerEvent) => {
+			if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
+		};
+		const escape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setOpen(false);
+		};
+		document.addEventListener("pointerdown", close);
+		document.addEventListener("keydown", escape);
+		return () => {
+			document.removeEventListener("pointerdown", close);
+			document.removeEventListener("keydown", escape);
+		};
+	}, [open]);
+	const live = card.pill !== null;
+	return (
+		<div className="card-menu" ref={box} data-no-dnd>
+			<button
+				type="button"
+				className="menu-button"
+				aria-label="Card actions"
+				aria-haspopup="menu"
+				aria-expanded={open}
+				onClick={() => setOpen((value) => !value)}
+			>
+				<svg viewBox="0 0 4 16" aria-hidden="true">
+					<circle cx="2" cy="2" r="1.6" />
+					<circle cx="2" cy="8" r="1.6" />
+					<circle cx="2" cy="14" r="1.6" />
+				</svg>
+			</button>
+			{open ? (
+				<div className="menu" role="menu">
+					<button
+						type="button"
+						role="menuitem"
+						onClick={() => {
+							setOpen(false);
+							handlers.onOpen();
+						}}
+					>
+						Edit
+					</button>
+					<button
+						type="button"
+						role="menuitem"
+						className="danger-item"
+						disabled={live}
+						title={live ? "Stop the agent before deleting this card." : undefined}
+						onClick={() => {
+							setOpen(false);
+							handlers.onDelete();
+						}}
+					>
+						Delete
+					</button>
+				</div>
+			) : null}
+		</div>
+	);
+}

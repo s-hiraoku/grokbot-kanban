@@ -33,5 +33,6 @@ function toCommand(raw: ReturnType<typeof ownerCommandSchema.parse>): OwnerComma
 	if (raw.type === "drop") return { type: "drop", cardId: raw.cardId as CardId, column: raw.column, index: raw.index };
 	if (raw.type === "saveBot") return { type: "saveBot", id: raw.id, profile: raw.profile };
 	if (raw.type === "deleteBot") return { type: "deleteBot", id: raw.id };
+	if (raw.type === "deleteCard") return { type: "deleteCard", cardId: raw.cardId as CardId };
 	return { type: "stop", cardId: raw.cardId as CardId };
 }

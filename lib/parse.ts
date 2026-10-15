@@ -109,6 +109,7 @@ export const ownerCommandSchema = z.discriminatedUnion("type", [
 		.strict(),
 	z.object({ type: z.literal("saveBot"), id: z.string().min(1).max(64).nullable(), profile: botProfileSchema }).strict(),
 	z.object({ type: z.literal("deleteBot"), id: z.string().min(1).max(64) }).strict(),
+	z.object({ type: z.literal("deleteCard"), cardId: z.string().uuid() }).strict(),
 ]);
 
 export function parseJson(raw: unknown): unknown {

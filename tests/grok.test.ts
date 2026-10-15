@@ -187,3 +187,21 @@ test("the owner assigns from the board and manages the roster", async () => {
 	const removedBoard = ((await removed.json()) as { board: any }).board;
 	expect((cardIn(removedBoard, created.card.id)!.card as any).assignees.map((member: { name: string }) => member.name)).toEqual(["You"]);
 });
+
+test("the owner deletes a card, but not one with a live run", async () => {
+	const idle = await call("create_card", { bot: "Ops", title: "throw away" });
+	const removed = await command(ownerRequest(holder.current!, { type: "deleteCard", cardId: idle.card.id }));
+	const removedBody = (await removed.json()) as { board: any; notice: string };
+	expect(removedBody.notice).toBe("Card deleted");
+	expect(cardIn(removedBody.board, idle.card.id)).toBeNull();
+
+	const live = await call("create_card", { bot: "Ops", title: "keep", repo: { url: "https://github.com/a/b" } });
+	await command(ownerRequest(holder.current!, { type: "run", cardId: live.card.id }));
+	const refused = await command(ownerRequest(holder.current!, { type: "deleteCard", cardId: live.card.id }));
+	expect(refused.status).toBe(400);
+	expect(((await refused.json()) as { notice: string }).notice).toBe("Stop the agent before deleting this card.");
+	expect((await call("get_card", { card: live.card.id })).column).toBe("inProgress");
+
+	const tools = (await rpc("tools/list")).body!.result.tools as { name: string }[];
+	expect(tools.map((tool) => tool.name).some((name) => name.includes("delete"))).toBe(false);
+});

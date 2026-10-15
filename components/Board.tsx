@@ -36,7 +36,8 @@ export type Command =
 	| { type: "stop"; cardId: string }
 	| { type: "drop"; cardId: string; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: Record<string, unknown> }
-	| { type: "deleteBot"; id: string };
+	| { type: "deleteBot"; id: string }
+	| { type: "deleteCard"; cardId: string };
 
 type Order = Record<Column, string[]>;
 
@@ -261,6 +262,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		onOpen: () => {
 			// The click that ends a drag is not a request to open the card.
 			if (Date.now() - droppedAt.current > 250) setDrawer({ mode: "edit", cardId: card.id });
+		},
+		onDelete: () => {
+			if (window.confirm(`Delete “${card.title}”? This cannot be undone.`)) void send({ type: "deleteCard", cardId: card.id });
 		},
 	});
 
