@@ -1,6 +1,6 @@
 # grokbot-kanban
 
-A dark kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, and annotate cards over MCP or HTTP. Only you move cards and start Cursor cloud agents, and at most 3 run at once.
+A dark kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, annotate, and move cards over MCP or HTTP. Only you start and stop Cursor cloud agents, and at most 3 run at once.
 
 The board is meant to be served at `kanban.hiraoku.dev`. This repo does not deploy itself.
 
@@ -81,9 +81,10 @@ Because the connector is shared, the board cannot tell Bots apart by token. Ever
 | `update_card` | yes | Edit content. It has no column field |
 | `add_note` | yes | Append a signed, timestamped line to the notes |
 | `assign_card` | yes | Add, remove, or set assignees. With nothing given, it assigns the caller |
+| `move_card` | yes | Move to Inbox, Todo, Done, or Won't Do with a reason signed into the notes. Todo only parks |
 | `update_my_profile` | yes | Name, role, icon, color |
 
-Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask. No tool moves a card or starts a Cursor agent.
+Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask. No tool starts, stops, or dequeues a Cursor agent. `move_card` refuses a card that is queued or running, and In Progress and In Review are set only by runs.
 
 The same endpoint works from the xAI API as a remote MCP tool. Pass `server_url`, `server_label`, `authorization` with the token, and `allowed_tools` to keep a script read-only.
 
@@ -101,7 +102,7 @@ If the create call times out or returns a server error, the card stays in progre
 
 ## Bot API
 
-Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` and writes nothing. The bot can create and edit card content, including `assignees`. It cannot move a card or start a run. A body with any other field returns `400`.
+Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` and writes nothing. The bot can create and edit card content, including `assignees`. The REST API cannot move a card or start a run; use the MCP `move_card` tool to move one. A body with any other field returns `400`.
 
 Add `X-Bot-Name` with the bot's name, URL-encoded if it is not ASCII, to record who filed or edited a card. `assignees` takes bot names, `owner`, and `me` for the caller.
 

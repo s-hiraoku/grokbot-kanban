@@ -51,8 +51,7 @@ test("MCP needs the bot token and speaks JSON-RPC", async () => {
 
 	const list = await rpc("tools/list");
 	const names = (list.body!.result.tools as { name: string; annotations: { readOnlyHint: boolean } }[]).map((tool) => tool.name);
-	expect(names).toEqual(expect.arrayContaining(["board_summary", "list_cards", "create_card", "assign_card", "add_note", "update_my_profile"]));
-	expect(names).not.toContain("move_card");
+	expect(names).toEqual(expect.arrayContaining(["board_summary", "list_cards", "create_card", "assign_card", "add_note", "move_card", "update_my_profile"]));
 	const readOnly = (list.body!.result.tools as { name: string; annotations: { readOnlyHint: boolean } }[]).filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name);
 	expect(readOnly.sort()).toEqual(["board_summary", "get_card", "list_bots", "list_cards"]);
 
@@ -105,13 +104,30 @@ test("a bot files, claims, and annotates a card through MCP", async () => {
 	expect(board.bots.find((item: { name: string }) => item.name === "Bug Repro")).toMatchObject({ assigned: 1, created: 1, role: "Reproduces bug reports" });
 });
 
-test("MCP tools cannot move a card or start a run", async () => {
+test("a bot parks cards as work progresses but never starts or interrupts a run", async () => {
 	const created = await call("create_card", { bot: "Ops", title: "run me", repo: { url: "https://github.com/a/b" } });
 	const { body } = await rpc("tools/call", { name: "update_card", arguments: { bot: "Ops", card: created.card.id, column: "todo" } });
 	expect(body!.result.isError).toBe(true);
-	const after = await call("get_card", { card: created.card.id });
-	expect(after.column).toBe("inbox");
+
+	const parked = await call("move_card", { bot: "Ops", card: created.card.shortId, to: "todo" });
+	expect(parked.column).toBe("todo");
+	expect(parked.status).toBe("idle");
 	expect(holder.current!.cursor.created).toEqual([]);
+
+	const done = await call("move_card", { bot: "Ops", card: created.card.id, to: "done", reason: "Fixed in PR 12" });
+	expect(done.column).toBe("done");
+	expect(done.notes).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} Ops\] Moved from Todo to Done: Fixed in PR 12$/);
+
+	const inReview = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: created.card.id, to: "inReview" } });
+	expect(inReview.body!.error ?? inReview.body!.result.isError).toBeTruthy();
+
+	await call("move_card", { bot: "Ops", card: created.card.id, to: "inbox" });
+	await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id }));
+	expect(holder.current!.cursor.created).toHaveLength(1);
+	const running = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: created.card.id, to: "done" } });
+	expect(running.body!.result.isError).toBe(true);
+	expect(running.body!.result.content[0].text).toMatch(/Only the owner can move it/);
+	expect((await call("get_card", { card: created.card.id })).column).toBe("inProgress");
 });
 
 test("the REST bot API reads X-Bot-Name and resolves assignees", async () => {
