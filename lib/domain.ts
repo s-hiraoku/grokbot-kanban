@@ -47,7 +47,12 @@ export type CardContent = {
 	priority: Priority;
 	kind: CardKind;
 	screening: { by: string | null } | null;
+	assignees: readonly MemberId[];
 };
+
+/** A bot id from the roster, or OWNER_MEMBER for the human owner. */
+export type MemberId = string;
+export const OWNER_MEMBER = "owner";
 
 export type ContentPatch = {
 	[K in keyof CardContent]?: CardContent[K];
@@ -86,6 +91,7 @@ export type SlotHolder = Extract<CardState, { slot: Slot }>;
 export type Card = {
 	id: CardId;
 	createdAt: Instant;
+	createdBy: MemberId | null;
 	rank: string;
 	content: CardContent;
 	state: CardState;
@@ -361,6 +367,23 @@ export function repoKey(url: string): string {
 		.replace(/^https?:\/\//, "")
 		.replace(/\.git$/, "")
 		.replace(/\/$/, "");
+}
+
+/** A rank that sorts between two neighbours. Either side may be missing. */
+export function rankBetween(before: string | null, after: string | null): string {
+	const low = before === null ? null : Number(before);
+	const high = after === null ? null : Number(after);
+	let value: number;
+	if (low === null && high === null) value = 1000;
+	else if (low === null) value = (high as number) > 1 ? (high as number) / 2 : (high as number) - 1000;
+	else if (high === null) value = low + 1000;
+	else value = (low + high) / 2;
+	return formatRank(value);
+}
+
+function formatRank(value: number): string {
+	const fixed = Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/0+$/, "");
+	return value < 0 ? fixed : fixed.padStart(16, "0");
 }
 
 export function nextRank(ranks: readonly string[]): string {

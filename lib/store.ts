@@ -1,20 +1,35 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { Card, CardContent, CardId, CardState, ContentPatch, HttpsUrl, Instant } from "./domain";
-import { cards } from "./schema";
+import type { BotProfile, BotProfilePatch } from "./bots";
+import type { Card, CardContent, CardId, CardState, ContentPatch, HttpsUrl, Instant, MemberId } from "./domain";
+import { bots, cards } from "./schema";
 
 type QueryDb = {
 	select: () => {
-		from: (table: typeof cards) => Promise<Row[]> & { where: (condition: unknown) => Promise<Row[]> };
+		from: <R = Row>(table: typeof cards | typeof bots) => Promise<R[]> & { where: (condition: unknown) => Promise<R[]> };
 	};
-	insert: (table: typeof cards) => {
-		values: (value: Record<string, unknown>) => { returning: () => Promise<Row[]> };
-	};
-	update: (table: typeof cards) => {
-		set: (value: Record<string, unknown>) => {
-			where: (condition: unknown) => { returning: () => Promise<Row[]> };
+	insert: (table: typeof cards | typeof bots) => {
+		values: (value: Record<string, unknown>) => {
+			returning: <R = Row>() => Promise<R[]>;
+			onConflictDoNothing: () => { returning: <R = Row>() => Promise<R[]> };
 		};
 	};
+	update: (table: typeof cards | typeof bots) => {
+		set: (value: Record<string, unknown>) => {
+			where: (condition: unknown) => { returning: <R = Row>() => Promise<R[]> };
+		};
+	};
+	delete: (table: typeof bots) => { where: (condition: unknown) => { returning: <R = BotRow>() => Promise<R[]> } };
+};
+
+type BotRow = {
+	id: string;
+	name: string;
+	role: string;
+	avatar: string | null;
+	color: string;
+	createdAt: Date;
+	lastSeenAt: Date | null;
 };
 
 type Row = {
@@ -30,6 +45,8 @@ type Row = {
 	priority: string;
 	kind: unknown;
 	screening: unknown;
+	assignees: unknown;
+	createdBy: string | null;
 	rank: string;
 	state: unknown;
 	stateVersion: number;
@@ -40,12 +57,25 @@ export type WriteResult = "written" | "conflict" | "slotTaken";
 export type Store = {
 	all(): Promise<Card[]>;
 	get(id: CardId): Promise<Card | null>;
-	insert(row: { externalId: string | null; content: CardContent; rank: string; now: Instant }): Promise<{
+	insert(row: {
+		externalId: string | null;
+		content: CardContent;
+		rank: string;
+		now: Instant;
+		createdBy: MemberId | null;
+	}): Promise<{
 		card: Card;
 		created: boolean;
 	}>;
 	patchContent(id: CardId, patch: ContentPatch): Promise<Card | null>;
 	writeState(id: CardId, expectedVersion: number, next: { state: CardState; rank: string }): Promise<WriteResult>;
+	writeRank(id: CardId, rank: string): Promise<boolean>;
+	bots(): Promise<BotProfile[]>;
+	bot(id: string): Promise<BotProfile | null>;
+	/** Inserts the bot if its id is new. Returns the stored row either way. */
+	ensureBot(profile: BotProfile): Promise<BotProfile>;
+	updateBot(id: string, patch: BotProfilePatch & { lastSeenAt?: Instant }): Promise<BotProfile | null>;
+	deleteBot(id: string): Promise<boolean>;
 };
 
 const slot = z.union([z.literal(1), z.literal(2), z.literal(3)]);
@@ -100,6 +130,7 @@ const contentSchema = z.object({
 		z.object({ type: z.literal("voice"), seconds: z.number() }),
 	]),
 	screening: z.object({ by: z.string().nullable() }).nullable(),
+	assignees: z.array(z.string()),
 });
 
 const idleInbox: CardState = { kind: "idle", column: "inbox", last: null };
@@ -127,6 +158,7 @@ export function createStore(db: QueryDb): Store {
 						id: crypto.randomUUID(),
 						createdAt: new Date(row.now),
 						externalId: row.externalId,
+						createdBy: row.createdBy,
 						rank: row.rank,
 						state: idleInbox,
 						stateVersion: 0,
@@ -174,6 +206,63 @@ export function createStore(db: QueryDb): Store {
 				throw error;
 			}
 		},
+		async writeRank(id, rank) {
+			const updated = await db.update(cards).set({ rank }).where(eq(cards.id, id)).returning();
+			return updated.length > 0;
+		},
+		async bots() {
+			const rows = await db.select().from<BotRow>(bots);
+			return rows.map(readBot).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+		},
+		async bot(id) {
+			const rows = await db.select().from<BotRow>(bots).where(eq(bots.id, id));
+			return rows[0] ? readBot(rows[0]) : null;
+		},
+		async ensureBot(profile) {
+			await db
+				.insert(bots)
+				.values({
+					id: profile.id,
+					name: profile.name,
+					role: profile.role,
+					avatar: profile.avatar,
+					color: profile.color,
+					createdAt: new Date(profile.createdAt),
+					lastSeenAt: profile.lastSeenAt === null ? null : new Date(profile.lastSeenAt),
+				})
+				.onConflictDoNothing()
+				.returning<BotRow>();
+			const rows = await db.select().from<BotRow>(bots).where(eq(bots.id, profile.id));
+			if (!rows[0]) throw new Error("bot insert returned no row");
+			return readBot(rows[0]);
+		},
+		async updateBot(id, patch) {
+			const values: Record<string, unknown> = {};
+			if (patch.name !== undefined) values.name = patch.name;
+			if (patch.role !== undefined) values.role = patch.role;
+			if (patch.avatar !== undefined) values.avatar = patch.avatar;
+			if (patch.color !== undefined) values.color = patch.color;
+			if (patch.lastSeenAt !== undefined) values.lastSeenAt = new Date(patch.lastSeenAt);
+			if (Object.keys(values).length === 0) return this.bot(id);
+			const rows = await db.update(bots).set(values).where(eq(bots.id, id)).returning<BotRow>();
+			return rows[0] ? readBot(rows[0]) : null;
+		},
+		async deleteBot(id) {
+			const rows = await db.delete(bots).where(eq(bots.id, id)).returning();
+			return rows.length > 0;
+		},
+	};
+}
+
+function readBot(row: BotRow): BotProfile {
+	return {
+		id: row.id,
+		name: row.name,
+		role: row.role,
+		avatar: row.avatar,
+		color: row.color,
+		createdAt: new Date(row.createdAt).getTime() as Instant,
+		lastSeenAt: row.lastSeenAt ? (new Date(row.lastSeenAt).getTime() as Instant) : null,
 	};
 }
 
@@ -185,7 +274,15 @@ async function findExternal(db: QueryDb, externalId: string): Promise<Card | nul
 
 function contentValues(
 	content: CardContent,
-	meta: { id: string; createdAt: Date; externalId: string | null; rank: string; state: CardState; stateVersion: number },
+	meta: {
+		id: string;
+		createdAt: Date;
+		externalId: string | null;
+		createdBy: MemberId | null;
+		rank: string;
+		state: CardState;
+		stateVersion: number;
+	},
 ): Record<string, unknown> {
 	return { ...meta, ...contentColumns(content) };
 }
@@ -201,6 +298,7 @@ function contentColumns(content: CardContent): Record<string, unknown> {
 		priority: content.priority,
 		kind: content.kind,
 		screening: content.screening,
+		assignees: [...content.assignees],
 	};
 }
 
@@ -210,6 +308,7 @@ function readCard(row: Row): Card {
 	return {
 		id: row.id as CardId,
 		createdAt: new Date(row.createdAt).getTime() as Instant,
+		createdBy: row.createdBy,
 		rank: row.rank,
 		content,
 		state,
@@ -228,6 +327,7 @@ function readContent(row: Row): CardContent {
 		priority: row.priority,
 		kind: row.kind,
 		screening: row.screening,
+		assignees: row.assignees ?? [],
 	});
 	return {
 		...parsed,

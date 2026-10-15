@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { openBoard, type BoardHandle, type OwnerCommand } from "@/lib/board";
@@ -6,6 +5,7 @@ import { createCursorClient, type CursorClient } from "@/lib/cursor";
 import type { Instant } from "@/lib/domain";
 import { sessionCookie } from "@/lib/auth";
 import * as schema from "@/lib/schema";
+import { migrationSql } from "@/lib/migrations";
 import { createStore } from "@/lib/store";
 import type { Env } from "@/lib/runtime";
 
@@ -39,7 +39,7 @@ export type TestApp = {
 
 export async function boot(): Promise<TestApp> {
 	const client = new PGlite();
-	await client.exec(readFileSync("drizzle/0000_init.sql", "utf8"));
+	await client.exec(migrationSql());
 	const db = drizzle(client, { schema });
 	const cursor = fakeCursor();
 	let now = Date.parse("2026-10-11T00:00:00.000Z");

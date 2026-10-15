@@ -8,8 +8,19 @@ export function json(body: unknown, status = 200, headers?: HeadersInit): Respon
 	return Response.json(body, { status, headers });
 }
 
-export function badRequest(): Response {
-	return json({ error: "bad_request" }, 400);
+export function badRequest(message?: string): Response {
+	return json(message ? { error: "bad_request", message } : { error: "bad_request" }, 400);
+}
+
+/** The calling Grok Bot's name, from the optional X-Bot-Name header. */
+export function botNameFrom(req: Request): string | null {
+	const raw = req.headers.get("x-bot-name");
+	if (!raw) return null;
+	try {
+		return decodeURIComponent(raw).trim() || null;
+	} catch {
+		return raw.trim() || null;
+	}
 }
 
 export function unauthorized(): Response {

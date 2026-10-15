@@ -25,6 +25,9 @@ const kindSchema = z.discriminatedUnion("type", [
 
 const screeningSchema = z.object({ by: z.string().max(40).nullable() }).strict().nullable();
 
+/** Bot ids or names, "owner", or (for a bot caller) "me". The board resolves them. */
+export const memberRefsSchema = z.array(z.string().trim().min(1).max(40)).max(10);
+
 const contentSchema = z
 	.object({
 		title: z.string().min(1).max(200),
@@ -36,6 +39,7 @@ const contentSchema = z
 		priority: z.enum(["low", "normal", "high"]).default("normal"),
 		kind: kindSchema.default({ type: "text" }),
 		screening: screeningSchema.default(null),
+		assignees: memberRefsSchema.default([]),
 	})
 	.strict();
 
@@ -50,6 +54,7 @@ export const contentPatchSchema = z
 		priority: z.enum(["low", "normal", "high"]).optional(),
 		kind: kindSchema.optional(),
 		screening: screeningSchema.optional(),
+		assignees: memberRefsSchema.optional(),
 	})
 	.strict()
 	.refine((value) => Object.keys(value).length > 0, "empty patch");
@@ -66,8 +71,30 @@ export const newCardBodySchema = z
 		priority: z.enum(["low", "normal", "high"]).optional(),
 		kind: kindSchema.optional(),
 		screening: screeningSchema.optional(),
+		assignees: memberRefsSchema.optional(),
 	})
 	.strict();
+
+export const botProfileSchema = z
+	.object({
+		name: z.string().trim().min(1).max(40),
+		role: z.string().max(200).default(""),
+		avatar: z
+			.string()
+			.trim()
+			.max(500)
+			.nullable()
+			.default(null)
+			.refine((value) => value === null || value === "" || value.startsWith("https://") || Array.from(value).length <= 4, "avatar must be an https URL or a short emoji"),
+		color: z
+			.string()
+			.regex(/^#[0-9a-fA-F]{6}$/)
+			.nullable()
+			.default(null),
+	})
+	.strict();
+
+const columnSchema = z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]);
 
 const parkColumn = z.enum(["inbox", "todo", "done", "wontDo"]);
 
@@ -77,6 +104,11 @@ export const ownerCommandSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("move"), cardId: z.string().uuid(), to: parkColumn }).strict(),
 	z.object({ type: z.literal("run"), cardId: z.string().uuid() }).strict(),
 	z.object({ type: z.literal("stop"), cardId: z.string().uuid() }).strict(),
+	z
+		.object({ type: z.literal("drop"), cardId: z.string().uuid(), column: columnSchema, index: z.number().int().min(0).max(10_000) })
+		.strict(),
+	z.object({ type: z.literal("saveBot"), id: z.string().min(1).max(64).nullable(), profile: botProfileSchema }).strict(),
+	z.object({ type: z.literal("deleteBot"), id: z.string().min(1).max(64) }).strict(),
 ]);
 
 export function parseJson(raw: unknown): unknown {
@@ -107,6 +139,7 @@ export function contentFromNewCard(raw: z.infer<typeof newCardBodySchema>): Card
 		priority: raw.priority,
 		kind: raw.kind,
 		screening: raw.screening,
+		assignees: raw.assignees,
 	});
 	return brandContent(content);
 }
@@ -136,6 +169,7 @@ export function brandPatch(patch: z.infer<typeof contentPatchSchema>): ContentPa
 	if (patch.priority !== undefined) next.priority = patch.priority;
 	if (patch.kind !== undefined) next.kind = patch.kind;
 	if (patch.screening !== undefined) next.screening = patch.screening;
+	if (patch.assignees !== undefined) next.assignees = patch.assignees;
 	return next;
 }
 
