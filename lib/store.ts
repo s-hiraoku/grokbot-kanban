@@ -19,7 +19,7 @@ type QueryDb = {
 			where: (condition: unknown) => { returning: <R = Row>() => Promise<R[]> };
 		};
 	};
-	delete: (table: typeof bots) => { where: (condition: unknown) => { returning: <R = BotRow>() => Promise<R[]> } };
+	delete: (table: typeof cards | typeof bots) => { where: (condition: unknown) => { returning: <R = Row>() => Promise<R[]> } };
 };
 
 type BotRow = {
@@ -76,6 +76,7 @@ export type Store = {
 	ensureBot(profile: BotProfile): Promise<BotProfile>;
 	updateBot(id: string, patch: BotProfilePatch & { lastSeenAt?: Instant }): Promise<BotProfile | null>;
 	deleteBot(id: string): Promise<boolean>;
+	deleteCard(id: CardId): Promise<boolean>;
 };
 
 const slot = z.union([z.literal(1), z.literal(2), z.literal(3)]);
@@ -249,6 +250,10 @@ export function createStore(db: QueryDb): Store {
 		},
 		async deleteBot(id) {
 			const rows = await db.delete(bots).where(eq(bots.id, id)).returning();
+			return rows.length > 0;
+		},
+		async deleteCard(id) {
+			const rows = await db.delete(cards).where(eq(cards.id, id)).returning();
 			return rows.length > 0;
 		},
 	};

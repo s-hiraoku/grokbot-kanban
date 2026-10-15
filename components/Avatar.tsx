@@ -10,7 +10,7 @@ export function MemberAvatar({ member, size = 22, ring = false }: { member: Memb
 		width: size,
 		height: size,
 		fontSize: member.avatar && !isImage ? Math.round(size * 0.62) : Math.max(9, Math.round(size * 0.42)),
-		background: isImage ? "transparent" : member.kind === "owner" ? "#3a3326" : `${member.color}`,
+		background: isImage ? "transparent" : member.kind === "owner" ? "#3b2f12" : `${member.color}`,
 	};
 	return (
 		<span className={className} style={style} title={member.kind === "bot" ? `${member.name} (bot)` : member.name}>

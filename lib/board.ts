@@ -2,6 +2,7 @@ import { isBot, isCron, isOwner, type Bot, type Cron, type Owner } from "./auth"
 import { botIdFor, cleanBotName, colorFor, type BotProfile, type BotProfilePatch } from "./bots";
 import type { CursorClient } from "./cursor";
 import {
+	COLUMNS,
 	OWNER_MEMBER,
 	START_TIMEOUT_MS,
 	actionFor,
@@ -49,7 +50,8 @@ export type OwnerCommand =
 	| { type: "stop"; cardId: CardId }
 	| { type: "drop"; cardId: CardId; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: BotProfileInput }
-	| { type: "deleteBot"; id: string };
+	| { type: "deleteBot"; id: string }
+	| { type: "deleteCard"; cardId: CardId };
 
 export type CommandResult = {
 	board: BoardView;
@@ -92,7 +94,8 @@ export type BoardSummary = {
 
 /**
  * What a bot may do. `actor` is the calling bot's name as it appears in its Grok Bot profile.
- * A new name joins the roster on first use. A bot never moves a card or starts a run.
+ * A new name joins the roster on first use. A bot may park a card in Inbox, Todo, Done, or Won't Do,
+ * but never starts, stops, or dequeues a run: Todo from a bot only parks the card.
  */
 export type BotBoard = {
 	create(input: NewCardInput, actor?: string | null): Promise<{ card: BotCardView; created: boolean }>;
@@ -102,6 +105,7 @@ export type BotBoard = {
 	list(filter: CardFilter, actor?: string | null): Promise<BotCardView[]>;
 	assign(ref: string, change: AssignChange, actor: string | null): Promise<BotCardView | null>;
 	addNote(ref: string, text: string, actor: string | null): Promise<BotCardView | null>;
+	move(ref: string, to: ParkColumn, reason: string | null, actor: string | null): Promise<BotCardView | null>;
 	roster(): Promise<BotView[]>;
 	identify(actor: string): Promise<BotView>;
 	updateProfile(actor: string, patch: BotProfilePatch): Promise<BotView>;
@@ -148,7 +152,7 @@ export function openBoard(deps: BoardDeps): BoardHandle {
 		},
 		bot(cap) {
 			if (!isBot(cap)) throw new Error("unauthorized");
-			return botApi(deps.store, deps.now);
+			return botApi(deps);
 		},
 		cron(cap) {
 			if (!isCron(cap)) throw new Error("unauthorized");
@@ -163,7 +167,8 @@ export function openBoard(deps: BoardDeps): BoardHandle {
 	};
 }
 
-function botApi(store: Store, now: () => Instant): BotBoard {
+function botApi(deps: BoardDeps): BotBoard {
+	const { store, now } = deps;
 	const identify = async (actor: string | null | undefined): Promise<BotProfile | null> => {
 		if (!actor) return null;
 		return touchBot(store, actor, now());
@@ -244,6 +249,29 @@ function botApi(store: Store, now: () => Instant): BotBoard {
 			const notes = card.content.notes ? `${card.content.notes}\n${line}` : line;
 			if (notes.length > 20_000) throw new BoardInputError("notes would exceed 20000 characters");
 			return updateCard(card, { notes });
+		},
+		async move(ref, to, reason, actor) {
+			const bot = await identify(actor);
+			const card = await findCard(store, ref);
+			if (!card) return null;
+			const from = columnOf(card.state);
+			if (from === to) return toBotCard(card, await store.bots());
+			// Queued and running cards belong to the owner's run controls; moving one would dequeue or stop it.
+			if (card.state.kind !== "idle" && card.state.kind !== "review") {
+				throw new BoardInputError(`This card is ${card.state.kind === "queued" ? "waiting for an agent slot" : "running a Cursor agent"}. Only the owner can move it now.`);
+			}
+			if (!moveTargetsFor(card.state).includes(to)) throw new BoardInputError(`This card cannot move to ${labelOf(to)}.`);
+			const siblings = (await store.all()).filter((item) => item.id !== card.id && columnOf(item.state) === to);
+			const applied = await apply(deps, card.id, { type: "move", to });
+			if (applied.kind === "conflict" || applied.kind === "slotTaken") throw new BoardInputError("The board is busy. Try again.");
+			if (applied.kind === "rejected") throw new BoardInputError(noticeFor(applied) ?? "That move was refused.");
+			if (applied.kind === "missing") return null;
+			await store.writeRank(card.id, rankBetween(siblings.at(-1)?.rank ?? null, null));
+			const stamp = new Date(now()).toISOString().slice(0, 16).replace("T", " ");
+			const line = `[${stamp} ${bot?.name ?? "bot"}] Moved from ${labelOf(from)} to ${labelOf(to)}${reason?.trim() ? `: ${reason.trim()}` : ""}`;
+			const fresh = (await store.get(card.id)) ?? card;
+			const notes = fresh.content.notes ? `${fresh.content.notes}\n${line}` : line;
+			return updateCard(fresh, { notes: notes.slice(-20_000) });
 		},
 		async roster() {
 			const cards = await store.all();
@@ -364,6 +392,16 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 	const members = (refs: readonly string[]) =>
 		resolveMembers(deps.store, refs, { actor: null, now: deps.now(), autoCreate: false });
 	if (command.type === "saveBot") return saveBot(deps, command.id, command.profile);
+	if (command.type === "deleteCard") {
+		const card = await deps.store.get(command.cardId);
+		if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
+		// A queued or running card is tied to a slot and maybe a live agent. Stop it first.
+		if (card.state.kind !== "idle" && card.state.kind !== "review") {
+			throw new BoardInputError("Stop the agent before deleting this card.");
+		}
+		await deps.store.deleteCard(card.id);
+		return { board: await viewOf(deps), notice: "Card deleted", error: null };
+	}
 	if (command.type === "deleteBot") {
 		const removed = await deps.store.deleteBot(command.id);
 		if (!removed) return { board: await viewOf(deps), notice: null, error: "not_found" };
@@ -582,4 +620,8 @@ async function settleStop(deps: BoardDeps, card: Card): Promise<void> {
 
 async function viewOf(deps: BoardDeps): Promise<BoardView> {
 	return toBoardView(await deps.store.all(), await deps.store.bots(), deps.now());
+}
+
+function labelOf(column: Column): string {
+	return COLUMNS.find((item) => item.id === column)?.label ?? column;
 }

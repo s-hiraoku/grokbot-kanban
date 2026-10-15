@@ -1,6 +1,6 @@
 # grokbot-kanban
 
-A dark kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, and annotate cards over MCP or HTTP. Only you move cards and start Cursor cloud agents, and at most 3 run at once.
+A dark kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, annotate, and move cards over MCP or HTTP. Only you start and stop Cursor cloud agents, and at most 3 run at once.
 
 The board is meant to be served at `kanban.hiraoku.dev`. This repo does not deploy itself.
 
@@ -57,13 +57,15 @@ Drag a card by its body with a mouse, a long press on a touch screen, or Space a
 - Todo without a repo parks the card there and says so.
 - In Review only fills from agent PRs. A running card has to be stopped before it moves.
 
-Each card shows the bot that filed it and who holds it. Click the assignee row to change it, or the title to edit everything. Click an avatar in the header to see one member's cards, or Unassigned. `/` focuses search and `n` opens a new card. The board refreshes every 15 seconds while it is open, and every 4 seconds while an agent is queued or running.
+The team dock on the left lists you and every bot with how many cards each holds. Click a face to see only that member's cards, or Unassigned. Drop a card on a face to assign it to that member. On a phone the dock is a strip under the header.
+
+Each card shows the bot that filed it, a stripe in the color of the first assignee (dashed when nobody holds it), and the assignees' faces. Click a card, or focus it and press Enter, to open it in the side panel. There you edit every field, assign members, write notes, move it, and run or stop the agent. Field edits wait for Save changes. The ⋮ menu on a card has Edit and Delete; Delete is also in the panel, asks first, and is refused while the card is queued or running. Bots cannot delete cards. The ＋ on Inbox adds cards by title only. Done and Won't Do fold into narrow strips that still take drops; Won't Do starts folded. `/` focuses search and `n` opens a new card. The board refreshes every 15 seconds while it is open, and every 4 seconds while an agent is queued or running.
 
 `/?card=<id>` scrolls to a card and highlights it. MCP results carry this link so a bot's report can point at the card.
 
 ## Grok Bot over MCP
 
-`/api/mcp` is a stateless MCP server over Streamable HTTP. It takes `Authorization: Bearer $BOT_TOKEN`, the same token as the bot API.
+`/api/mcp` is a stateless MCP server over Streamable HTTP. It takes `Authorization: Bearer $BOT_TOKEN`, the same token as the bot API. GET and DELETE return `405` because there is no stream or session, but only after the token checks out. A client without the token gets `401` on every method, so a connector error of 405 means the token was accepted.
 
 Grok Bot has no settings form for custom servers. You ask a Bot in chat to add one, and for a server that needs a secret it recommends Remote HTTPS. **Bots & MCP → Connect Grok Bot** on the board has the message to send, with this deployment's URL filled in. When the Bot asks for the key, give the header name `Authorization` and the value `Bearer <BOT_TOKEN>`. Connectors are account-wide in Grok Bot, so one server entry serves every Bot.
 
@@ -79,17 +81,18 @@ Because the connector is shared, the board cannot tell Bots apart by token. Ever
 | `update_card` | yes | Edit content. It has no column field |
 | `add_note` | yes | Append a signed, timestamped line to the notes |
 | `assign_card` | yes | Add, remove, or set assignees. With nothing given, it assigns the caller |
+| `move_card` | yes | Move to Inbox, Todo, Done, or Won't Do with a reason signed into the notes. Todo only parks |
 | `update_my_profile` | yes | Name, role, icon, color |
 
-Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask. No tool moves a card or starts a Cursor agent.
+Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask. No tool starts, stops, or dequeues a Cursor agent. `move_card` refuses a card that is queued or running, and In Progress and In Review are set only by runs.
 
 The same endpoint works from the xAI API as a remote MCP tool. Pass `server_url`, `server_label`, `authorization` with the token, and `allowed_tools` to keep a script read-only.
 
 ## How runs work
 
-Drag a card onto Todo, or press Run or Re-run. The status dropdown never starts an agent. Choosing Todo there only parks the card.
+Drag a card onto Todo, or press Run or Re-run on the card or in its panel. The Move to buttons in the panel never start an agent. Moving to Todo there only parks the card.
 
-At most 3 cards hold a slot. The header shows `Agents N/3 running`. A fourth card stays in Todo with the note `waiting for a free slot (3 agents at most)`.
+At most 3 cards hold a slot. The header shows one light per slot and how many cards are waiting. A fourth card stays in Todo with the note `waiting for a free slot (3 agents at most)`.
 
 The text sent to Cursor is frozen when you queue the card. A later bot edit does not change that run. Press Stop, then Run, to send the new text.
 
@@ -99,7 +102,7 @@ If the create call times out or returns a server error, the card stays in progre
 
 ## Bot API
 
-Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` and writes nothing. The bot can create and edit card content, including `assignees`. It cannot move a card or start a run. A body with any other field returns `400`.
+Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` and writes nothing. The bot can create and edit card content, including `assignees`. The REST API cannot move a card or start a run; use the MCP `move_card` tool to move one. A body with any other field returns `400`.
 
 Add `X-Bot-Name` with the bot's name, URL-encoded if it is not ASCII, to record who filed or edited a card. `assignees` takes bot names, `owner`, and `me` for the caller.
 

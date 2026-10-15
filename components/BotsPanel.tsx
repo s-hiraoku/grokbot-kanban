@@ -40,7 +40,8 @@ export default function BotsPanel({
 - 調べた事実、証拠リンク、残る不確実性は add_note でカードに残す。事実と仮説を分ける
 - 新しい依頼や不具合報告は create_card で Inbox に起票する。X の投稿なら externalId に投稿 ID を入れる
 - 別の Bot に渡すときは assign_card の add にその Bot 名を入れ、add_note で引き継ぎ内容を書く
-- カードの列移動と Cursor エージェントの起動はオーナーの承認事項なので、頼まれても行わない
+- 作業が進んだら move_card でカードを動かし、reason に理由を書く（完了は done、見送りは wontDo、着手可能になったら todo）
+- Cursor エージェントの起動と停止はオーナーの承認事項なので、頼まれても行わない。待機中・実行中のカードは動かさない
 まだ Routine は作らないでください。`;
 	const apiSnippet = `{
   "type": "mcp",
@@ -79,8 +80,10 @@ export default function BotsPanel({
 									<div className="bot-info">
 										<strong>{bot.name}</strong>
 										<span className="muted small">{bot.role || "No role yet"}</span>
-										<span className="muted small">
-											{bot.assigned} assigned · {bot.created} filed · {bot.lastSeen ? `seen ${bot.lastSeen} ago` : "never seen"}
+										<span className="bot-stats">
+											<span>{bot.assigned} assigned</span>
+											<span>{bot.created} filed</span>
+											<span>{bot.lastSeen === null ? "Not seen yet" : bot.lastSeen === "just now" ? "Seen just now" : `Seen ${bot.lastSeen} ago`}</span>
 										</span>
 									</div>
 									<button
@@ -134,7 +137,7 @@ export default function BotsPanel({
 						<h3>Endpoint</h3>
 						<CopyBlock text={mcpUrl} />
 						<p className="muted small">
-							Streamable HTTP, stateless, JSON responses. Read tools are marked read-only so Auto-review can let them through. Bots can file, edit, assign, and annotate cards. Moving cards and starting Cursor agents stay with you.
+							Streamable HTTP, stateless, JSON responses. Read tools are marked read-only so Auto-review can let them through. Bots can file, edit, assign, annotate, and move cards between Inbox, Todo, Done, and Won't Do. Starting and stopping Cursor agents stays with you.
 						</p>
 						<h3>xAI API</h3>
 						<p className="muted small">The same server works as a remote MCP tool in the Responses API. Limit it to read tools when a script only needs to look.</p>

@@ -26,10 +26,17 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 // This server keeps no sessions and never pushes, so there is no SSE stream to open or session to end.
-export async function GET(): Promise<Response> {
-	return new Response(null, { status: 405, headers: { Allow: "POST" } });
+// Auth is checked first: a client without the token that falls back to GET should see 401, not a misleading 405.
+export async function GET(req: Request): Promise<Response> {
+	return notAllowed(req);
 }
 
-export async function DELETE(): Promise<Response> {
+export async function DELETE(req: Request): Promise<Response> {
+	return notAllowed(req);
+}
+
+function notAllowed(req: Request): Response {
+	const bot = requireBot(req, env());
+	if (bot instanceof Response) return bot;
 	return new Response(null, { status: 405, headers: { Allow: "POST" } });
 }

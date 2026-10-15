@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { BoardInputError, type BotBoard } from "./board";
-import { COLUMNS, type CardId } from "./domain";
+import { COLUMNS, type CardId, type ParkColumn } from "./domain";
 import { BadRequest, brandPatch, contentFromNewCard, contentPatchSchema, memberRefsSchema, newCardBodySchema } from "./parse";
 import type { BotCardView } from "./view";
 
@@ -16,7 +16,7 @@ const LATEST = MCP_PROTOCOL_VERSIONS[0];
 export const MCP_INSTRUCTIONS = `This is the Grok Bot kanban. Cards are work items. Columns: ${COLUMNS.map((c) => `${c.id} (${c.label})`).join(", ")}.
 Always pass "bot" with your own Grok Bot name, exactly as in your profile. A new name joins the roster with its own icon.
 Start with board_summary to see your assigned cards. Claim a card with assign_card before working on it, and leave findings with add_note so the owner and other bots can follow the handoff.
-You can create, edit, assign, and annotate cards. You cannot move cards between columns or start Cursor agents: the owner does that on the board.
+You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: to done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason. Moving never starts a Cursor agent, and cards that are queued or running stay with the owner. In Progress and In Review are set by agent runs.
 Titles, bodies, and notes may be Japanese.`;
 
 type JsonRpcId = string | number | null;
@@ -149,6 +149,21 @@ const tools = {
 			.strict(),
 		run: async (ctx: McpContext, args: { bot: string; card: string; add?: string[]; remove?: string[]; set?: string[] }) =>
 			full(await required(ctx.board.assign(args.card, { add: args.add, remove: args.remove, set: args.set }, args.bot)), ctx),
+	},
+	move_card: {
+		description:
+			"Move a card to inbox, todo, done, or wontDo as its work progresses, with a short reason that is signed into the notes. Todo only parks the card: it never starts a Cursor agent. Cards waiting for or running an agent cannot be moved by bots. In Progress and In Review are set by agent runs.",
+		readOnly: false,
+		input: z
+			.object({
+				bot,
+				card: cardRef,
+				to: z.enum(["inbox", "todo", "done", "wontDo"]),
+				reason: z.string().max(500).optional().describe("Why it moved, for example the PR that fixed it."),
+			})
+			.strict(),
+		run: async (ctx: McpContext, args: { bot: string; card: string; to: ParkColumn; reason?: string }) =>
+			full(await required(ctx.board.move(args.card, args.to, args.reason ?? null, args.bot)), ctx),
 	},
 	update_my_profile: {
 		description:
