@@ -8,6 +8,7 @@ import {
 	START_TIMEOUT_MS,
 	actionFor,
 	columnOf,
+	failureMessage,
 	isSlotHolder,
 	moveTargetsFor,
 	nextRank,
@@ -59,7 +60,7 @@ export type CommandResult = {
 	board: BoardView;
 	notice: string | null;
 	/** "warning" when the command went through but did not do what the drop or click suggests. */
-	tone?: "warning";
+	tone?: "warning" | "error";
 	error: null | "not_found" | "busy" | "bad_request";
 };
 
@@ -486,6 +487,9 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 	const outcome: CommandOutcome = state
 		? { kind: "settled", command: command.type, state }
 		: { kind: "missing" };
+	// A run that Cursor refused is back to idle; say why in a red toast instead of only on the card.
+	const refused = command.type === "run" && state?.kind === "idle" ? failureMessage(state) : null;
+	if (refused) return { board: await viewOf(deps), notice: refused, tone: "error", error: null };
 	// A run that only queued, or whose launch is unconfirmed, did not start an agent yet.
 	const tone = command.type === "run" && state && state.kind !== "running" ? ("warning" as const) : undefined;
 	return { board: await viewOf(deps), notice: noticeFor(outcome), ...(tone ? { tone } : {}), error: state ? null : "not_found" };

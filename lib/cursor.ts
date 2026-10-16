@@ -94,7 +94,8 @@ export function createCursorClient(options: {
 				return { kind: "unknown", message: error instanceof Error ? error.message : "network" };
 			}
 			if (response.status >= 400 && response.status < 500) {
-				return { kind: "rejected", message: `Cursor rejected the launch (${response.status}).` };
+				const reason = await errorReason(response);
+				return { kind: "rejected", message: `Cursor rejected the launch (${response.status})${reason ? `: ${reason}` : "."}` };
 			}
 			if (!response.ok) return { kind: "unknown", message: `Cursor returned ${response.status}.` };
 			const parsed = createResponse.safeParse(await response.json().catch(() => null));
@@ -144,6 +145,35 @@ export function createCursorClient(options: {
 			return "unreachable";
 		},
 	};
+}
+
+const REASON_LIMIT = 300;
+
+/**
+ * Cursor's 4xx bodies are not pinned down by its docs, so take the most readable text out of the
+ * common shapes ({ error }, { error: { message, code } }, { message }, { code }) or the raw text.
+ */
+async function errorReason(response: Response): Promise<string> {
+	const text = (await response.text().catch(() => "")).trim();
+	if (!text) return "";
+	let reason = text;
+	try {
+		reason = readReason(JSON.parse(text)) || text;
+	} catch {
+		// Not JSON: show the text as is.
+	}
+	const flat = reason.replace(/\s+/g, " ").trim();
+	return flat.length > REASON_LIMIT ? `${flat.slice(0, REASON_LIMIT - 1)}…` : flat;
+}
+
+function readReason(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (!value || typeof value !== "object") return "";
+	const record = value as Record<string, unknown>;
+	const message = readReason(record.message) || readReason(record.error) || readReason(record.detail) || readReason(record.details);
+	const code = typeof record.code === "string" ? record.code : "";
+	if (message && code && !message.includes(code)) return `${message} (${code})`;
+	return message || code;
 }
 
 function toObservation(run: z.infer<typeof runResponse>): RunObservation {

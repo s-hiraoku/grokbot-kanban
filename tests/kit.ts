@@ -136,7 +136,10 @@ function fakeCursor(): FakeCursor {
 			}
 			if (failure === "rejected") {
 				failure = null;
-				return new Response("no", { status: 400 });
+				return Response.json(
+					{ error: { code: "repository_access", message: "Cursor cannot access github.com/s-hiraoku/grokbot." } },
+					{ status: 400 },
+				);
 			}
 			const body = JSON.parse(String(init?.body)) as FakeCursor["created"][number];
 			n += 1;

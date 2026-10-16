@@ -101,6 +101,8 @@ The text sent to Cursor is frozen when you queue the card. A later bot edit does
 
 While the run is active the card is in In Progress. When the run finishes with a pull request, the card moves to In Review and stores the URL. Stop cancels the run. Stop does nothing useful while the create call is still unresolved, because that slot stays occupied until Cursor answers or the start times out.
 
+If Cursor refuses the create call (a 4xx), the card goes back to Todo and the board shows Cursor's own reason in a red toast and on the card, for example a repository Cursor cannot access.
+
 If the create call times out or returns a server error, the card stays in progress and the slot stays taken. After two minutes the board releases it and shows `Launch did not confirm. Check Cursor before running again.` Check Cursor before you run that card again. An agent may already exist.
 
 ## Bot API

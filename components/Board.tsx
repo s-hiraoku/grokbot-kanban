@@ -249,7 +249,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 			const message = commandToast(response.status, payload);
 			if (message) notify(message);
 			// A warning means the board did something other than what was asked, so callers treat it as not done.
-			return response.ok && payload.tone !== "warning";
+			return response.ok && payload.tone !== "warning" && payload.tone !== "error";
 		} catch {
 			notify(UNREACHABLE_TOAST);
 			await refresh();

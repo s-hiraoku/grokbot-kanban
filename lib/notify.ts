@@ -12,7 +12,7 @@ export function commandToast(status: number, payload: { notice?: string | null; 
 	const notice = payload.notice?.trim() || null;
 	if (status >= 200 && status < 300) {
 		if (!notice) return null;
-		return { text: notice, tone: payload.tone === "warning" ? "warning" : "success" };
+		return { text: notice, tone: payload.tone === "warning" || payload.tone === "error" ? payload.tone : "success" };
 	}
 	return { text: notice ?? fallbackFor(status), tone: "error" };
 }

@@ -211,6 +211,21 @@ test("an ambiguous create keeps the slot until the start times out", async () =>
 	expect(holder.current!.cursor.created.map((item) => item.prompt.text.split("\n")[0])).toEqual(["# 次1", "# 次2", "# 次3"]);
 });
 
+test("a rejected launch shows Cursor's reason on the card", async () => {
+	const response = await createCard(
+		botRequest("POST", "/api/bot/cards", { title: "拒否", body: "確認", repo: { url: "https://github.com/s-hiraoku/grokbot" } }),
+	);
+	const { card } = (await response.json()) as { card: { id: string } };
+	holder.current!.cursor.failNext("rejected");
+	const run = await command(ownerRequest(holder.current!, { type: "run", cardId: card.id }));
+	const body = (await run.json()) as { notice: string; tone: string; board: Parameters<typeof cardIn>[0] };
+	const reason = "Cursor rejected the launch (400): Cursor cannot access github.com/s-hiraoku/grokbot. (repository_access)";
+	expect(body.notice).toBe(reason);
+	expect(body.tone).toBe("error");
+	expect(cardIn(body.board, card.id)?.column).toBe("todo");
+	expect(cardIn(body.board, card.id)?.card).toMatchObject({ failure: reason });
+});
+
 test("postgres refuses a fourth slot holder", async () => {
 	const base = {
 		created_at: "now()",
