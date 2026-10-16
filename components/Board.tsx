@@ -26,6 +26,9 @@ import BotsPanel from "@/components/BotsPanel";
 import CardDrawer from "@/components/CardDrawer";
 import CardPanel, { type CardHandlers } from "@/components/CardPanel";
 import { COLUMNS, type Column, type ParkColumn } from "@/lib/domain";
+import { actionBlocked, dropHint, dropRefusal, dropTargets } from "@/lib/dropRules";
+import { OFFLINE_TOAST, ONLINE_TOAST, UNREACHABLE_TOAST, commandToast, pushToast, type ToastMessage } from "@/lib/notify";
+import Toasts, { type ShownToast } from "@/components/Toasts";
 import type { BoardView, BotView, CardView, MemberView } from "@/lib/view";
 
 export type Command =
@@ -75,20 +78,15 @@ function orderOf(board: BoardView): Order {
 	return Object.fromEntries(board.columns.map((column) => [column.id, column.cards.map((card): string => card.id)])) as unknown as Order;
 }
 
-function dropTargets(card: CardView): Set<Column> {
-	const targets = new Set<Column>(card.moveTargets);
-	targets.add(card.column);
-	if (card.action.command === "run" && card.action.enabled && card.repo) {
-		targets.add("todo");
-		targets.add("inProgress");
-	}
-	return targets;
-}
 
 export default function Board({ initial, studioUrl }: { initial: BoardView; studioUrl: string | null }) {
 	const [board, setBoard] = useState(initial);
 	const [order, setOrder] = useState<Order>(() => orderOf(initial));
-	const [toast, setToast] = useState<{ text: string; tone: "info" | "error" } | null>(null);
+	const [toasts, setToasts] = useState<ShownToast[]>([]);
+	const toastId = useRef(0);
+	const notify = useCallback((message: ToastMessage) => setToasts((current) => pushToast(current, { ...message, id: ++toastId.current })), []);
+	const dismiss = useCallback((id: number) => setToasts((current) => current.filter((item) => item.id !== id)), []);
+	const offline = useRef(0);
 	const [drawer, setDrawer] = useState<{ mode: "create" } | { mode: "edit"; cardId: string } | null>(null);
 	const [botsOpen, setBotsOpen] = useState(false);
 	const [activeId, setActiveId] = useState<string | null>(null);
@@ -172,11 +170,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 			return next;
 		});
 
-	useEffect(() => {
-		if (!toast) return;
-		const timer = window.setTimeout(() => setToast(null), 4200);
-		return () => window.clearTimeout(timer);
-	}, [toast]);
 
 	const refresh = useCallback(async () => {
 		try {
@@ -185,11 +178,16 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 				window.location.href = "/login";
 				return;
 			}
-			if (response.ok) accept((await response.json()) as BoardView);
+			if (!response.ok) throw new Error(String(response.status));
+			accept((await response.json()) as BoardView);
+			if (offline.current >= 2) notify(ONLINE_TOAST);
+			offline.current = 0;
 		} catch {
-			// Offline for a moment. The next tick tries again.
+			// One miss is usually a blip. Say so on the second, once, and keep retrying.
+			offline.current += 1;
+			if (offline.current === 2) notify(OFFLINE_TOAST);
 		}
-	}, [accept]);
+	}, [accept, notify]);
 
 	// Fast while an agent is queued or running, slower otherwise so bot edits still show up.
 	const live = board.agents.running + board.agents.queued > 0;
@@ -243,14 +241,15 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 				window.location.href = "/login";
 				return false;
 			}
-			const payload = (await response.json().catch(() => ({}))) as { board?: BoardView; notice?: string | null; error?: string };
+			const payload = (await response.json().catch(() => ({}))) as { board?: BoardView; notice?: string | null; tone?: string | null };
 			if (payload.board) accept(payload.board);
 			else if (!response.ok) await refresh();
-			if (payload.notice) setToast({ text: payload.notice, tone: response.ok ? "info" : "error" });
-			else if (!response.ok) setToast({ text: response.status === 503 ? "The board is busy. Try again." : "That did not go through.", tone: "error" });
-			return response.ok;
+			const message = commandToast(response.status, payload);
+			if (message) notify(message);
+			// A warning means the board did something other than what was asked, so callers treat it as not done.
+			return response.ok && payload.tone !== "warning";
 		} catch {
-			setToast({ text: "Could not reach the board. Check your connection.", tone: "error" });
+			notify(UNREACHABLE_TOAST);
 			await refresh();
 			return false;
 		}
@@ -266,6 +265,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		onDelete: () => {
 			if (window.confirm(`Delete “${card.title}”? This cannot be undone.`)) void send({ type: "deleteCard", cardId: card.id });
 		},
+		onBlocked: (reason) => notify({ text: reason, tone: "warning" }),
 	});
 
 	const needle = query.trim().toLowerCase();
@@ -357,7 +357,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		const origin = dragOrigin.current;
 		if (!card || !to || !dropTargets(card).has(to)) {
 			setOrder(orderOf(queued ?? board));
-			if (card && to && to !== card.column) setToast({ text: refusal(card, to), tone: "error" });
+			if (card && to && to !== card.column) notify({ text: dropRefusal(card, to), tone: "warning" });
 			return;
 		}
 		let list = order[to];
@@ -378,11 +378,11 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		const ids = card.assignees.map((item) => item.id);
 		if (!member) return;
 		if (ids.includes(memberId)) {
-			setToast({ text: `${member.name === "You" ? "You already have" : `${member.name} already has`} this card.`, tone: "info" });
+			notify({ text: `${member.name === "You" ? "You already have" : `${member.name} already has`} this card.`, tone: "warning" });
 			return;
 		}
 		void send({ type: "edit", cardId: card.id, patch: { assignees: [...ids, memberId] } }).then((ok) => {
-			if (ok) setToast({ text: member.id === OWNER.id ? "Assigned to you." : `Assigned to ${member.name}.`, tone: "info" });
+			if (ok) notify({ text: member.id === OWNER.id ? "Assigned to you." : `Assigned to ${member.name}.`, tone: "success" });
 		});
 	}
 
@@ -519,6 +519,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						members={members}
 						onClose={() => setDrawer(null)}
 						send={send}
+						notify={notify}
 						onSubmit={async (payload) => {
 							const ok = editing ? await send({ type: "edit", cardId: editing.id, patch: payload }) : await send({ type: "create", content: payload });
 							if (ok) setDrawer(null);
@@ -526,12 +527,8 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						}}
 					/>
 				) : null}
-				{botsOpen ? <BotsPanel bots={board.bots} onClose={() => setBotsOpen(false)} send={send} /> : null}
-				{toast ? (
-					<div className={`toast ${toast.tone}`} role="status">
-						{toast.text}
-					</div>
-				) : null}
+				{botsOpen ? <BotsPanel bots={board.bots} onClose={() => setBotsOpen(false)} send={send} notify={notify} /> : null}
+				<Toasts toasts={toasts} onDismiss={dismiss} />
 			</div>
 		</DndContext>
 	);
@@ -669,6 +666,41 @@ function QuickAdd({ onAdd, onCancel }: { onAdd: (title: string) => Promise<boole
 function SortableCard({ card, handlers, highlighted }: { card: CardView; handlers: CardHandlers; highlighted: boolean }) {
 	const draggable = card.moveTargets.length > 0;
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id, disabled: !draggable });
+	// A locked card does not follow the pointer, so a drag attempt on it says why instead of doing nothing.
+	const press = useRef<{ x: number; y: number; told: boolean } | null>(null);
+	const explain = () => {
+		const reason = actionBlocked(card, "move");
+		if (reason) handlers.onBlocked(reason);
+	};
+	const lockedHandlers = draggable
+		? {}
+		: {
+				onPointerDown: (event: React.PointerEvent) => {
+					if (event.button === 0 && !(event.target instanceof Element && event.target.closest("button, a, [data-no-dnd]"))) {
+						press.current = { x: event.clientX, y: event.clientY, told: false };
+					}
+				},
+				onPointerMove: (event: React.PointerEvent) => {
+					const start = press.current;
+					if (!start || start.told || Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
+					start.told = true;
+					explain();
+				},
+				// The click that ends a refused drag is not a request to open the card.
+				onClickCapture: (event: React.MouseEvent) => {
+					if (press.current?.told) event.stopPropagation();
+					press.current = null;
+				},
+				onPointerCancel: () => {
+					press.current = null;
+				},
+				onKeyDown: (event: React.KeyboardEvent) => {
+					if (event.key === " " && event.target === event.currentTarget) {
+						event.preventDefault();
+						explain();
+					}
+				},
+			};
 	return (
 		<CardPanel
 			ref={setNodeRef}
@@ -680,6 +712,7 @@ function SortableCard({ card, handlers, highlighted }: { card: CardView; handler
 			className={draggable ? "grab" : "locked"}
 			{...attributes}
 			{...listeners}
+			{...lockedHandlers}
 			aria-roledescription={draggable ? "draggable card" : "card"}
 			// A running card cannot be dragged, but it still opens.
 			aria-disabled={undefined}
@@ -690,25 +723,12 @@ function SortableCard({ card, handlers, highlighted }: { card: CardView; handler
 function emptyText(column: Column): string {
 	if (column === "inbox") return "New requests from bots land here";
 	if (column === "todo") return "Drop a card here to queue it";
-	if (column === "inProgress") return "No agents running";
-	if (column === "inReview") return "Agent PRs show up here";
+	if (column === "inProgress") return "Nothing in progress";
+	if (column === "inReview") return "Cards waiting for review, including agent PRs";
 	return "Nothing here yet";
 }
 
-function dropHint(card: CardView | null, column: Column): string | null {
-	if (!card || column === card.column) return null;
-	const targets = dropTargets(card);
-	if (!targets.has(column)) return column === "inReview" ? "Filled by agent PRs" : card.repo ? null : column === "inProgress" ? "Set a repo first" : null;
-	if (column === "todo" || column === "inProgress") return card.repo && card.action.command === "run" ? "Drop to run the agent" : "Drop to park";
-	return null;
-}
 
-function refusal(card: CardView, column: Column): string {
-	if (card.moveTargets.length === 0) return "Stop the agent before moving this card.";
-	if (column === "inReview") return "Cards reach In Review when an agent opens a PR.";
-	if (column === "inProgress" && !card.repo) return "Set a repo before running.";
-	return "That column does not take this card.";
-}
 
 /** The drop position among every card in the column, so a filtered view still lands next to its visible neighbour. */
 function fullIndex(board: BoardView, to: Column, list: string[], id: string, isVisible: ((id: string) => boolean) | null): number {

@@ -12,6 +12,7 @@ const { POST: mcp, GET: mcpGet } = await import("@/app/api/mcp/route");
 const { POST: createCard } = await import("@/app/api/bot/cards/route");
 const { POST: command } = await import("@/app/api/owner/commands/route");
 const { POST: sync } = await import("@/app/api/owner/sync/route");
+const { GET: avatarImage } = await import("@/app/api/avatar/[id]/route");
 
 beforeEach(async () => {
 	holder.current = await boot();
@@ -118,8 +119,15 @@ test("a bot parks cards as work progresses but never starts or interrupts a run"
 	expect(done.column).toBe("done");
 	expect(done.notes).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} Ops\] Moved from Todo to Done: Fixed in PR 12$/);
 
-	const inReview = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: created.card.id, to: "inReview" } });
-	expect(inReview.body!.error ?? inReview.body!.result.isError).toBeTruthy();
+	const working = await call("move_card", { bot: "Ops", card: created.card.id, to: "inProgress", reason: "Reproducing" });
+	expect(working).toMatchObject({ column: "inProgress", status: "idle", agentUrl: null });
+	const checking = await call("move_card", { bot: "Ops", card: created.card.id, to: "inReview" });
+	expect(checking).toMatchObject({ column: "inReview", status: "idle", prUrl: null });
+	expect(checking.notes).toMatch(/Moved from Done to In Progress: Reproducing\n.*Moved from In Progress to In Review$/);
+	expect(holder.current!.cursor.created).toEqual([]);
+
+	const nowhere = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: created.card.id, to: "archive" } });
+	expect(nowhere.body!.error ?? nowhere.body!.result.isError).toBeTruthy();
 
 	await call("move_card", { bot: "Ops", card: created.card.id, to: "inbox" });
 	await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id }));
@@ -152,6 +160,8 @@ test("a drop parks, reorders, or runs depending on the column", async () => {
 	const parkedBody = (await parked.json()) as { board: any; notice: string };
 	expect(cardIn(parkedBody.board, plain.card.id)?.column).toBe("todo");
 	expect(parkedBody.notice).toBe("Parked in Todo. Set a repo to run it.");
+	// The drop did less than it looked like it would, so the board shows it as a warning.
+	expect((parkedBody as any).tone).toBe("warning");
 	expect(holder.current!.cursor.created).toEqual([]);
 
 	const reordered = await command(ownerRequest(holder.current!, { type: "drop", cardId: third.card.id, column: "inbox", index: 0 }));
@@ -159,11 +169,23 @@ test("a drop parks, reorders, or runs depending on the column", async () => {
 	expect(inbox.cards.map((card: { title: string }) => card.title)).toEqual(["third", "has repo"]);
 
 	const review = await command(ownerRequest(holder.current!, { type: "drop", cardId: third.card.id, column: "inReview", index: 0 }));
-	expect(((await review.json()) as { notice: string }).notice).toBe("Cards reach In Review when an agent opens a PR.");
+	const reviewBody = (await review.json()) as { board: any; notice: string | null };
+	expect(cardIn(reviewBody.board, third.card.id)).toMatchObject({ column: "inReview", card: { pill: null } });
+	expect(reviewBody.notice).toBeNull();
+	expect((reviewBody as any).tone).toBeNull();
+
+	const manual = await command(ownerRequest(holder.current!, { type: "drop", cardId: plain.card.id, column: "inProgress", index: 0 }));
+	const manualBody = (await manual.json()) as { board: any; notice: string };
+	expect(cardIn(manualBody.board, plain.card.id)).toMatchObject({ column: "inProgress", card: { pill: null, action: { command: "run", enabled: true } } });
+	expect(manualBody.notice).toBe("Moved to In Progress without an agent. Set a repo to run one.");
+	expect((manualBody as any).tone).toBe("warning");
+	expect(manualBody.board.agents.running).toBe(0);
+	expect(holder.current!.cursor.created).toEqual([]);
 
 	const run = await command(ownerRequest(holder.current!, { type: "drop", cardId: repo.card.id, column: "todo", index: 0 }));
 	const runBody = (await run.json()) as { board: any; notice: string };
 	expect(cardIn(runBody.board, repo.card.id)?.column).toBe("inProgress");
+	expect((runBody as any).tone).toBeNull();
 	expect(holder.current!.cursor.created).toHaveLength(1);
 });
 
@@ -204,4 +226,86 @@ test("the owner deletes a card, but not one with a live run", async () => {
 
 	const tools = (await rpc("tools/list")).body!.result.tools as { name: string }[];
 	expect(tools.map((tool) => tool.name).some((name) => name.includes("delete"))).toBe(false);
+});
+
+test("an uploaded icon is stored once and served from its own URL", async () => {
+	const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+	const saved = await command(ownerRequest(holder.current!, { type: "saveBot", id: null, profile: { name: "Pixel", role: "", avatar: png, color: null } }));
+	expect(saved.status).toBe(200);
+	const bot = ((await saved.json()) as any).board.bots.find((item: any) => item.name === "Pixel");
+	expect(bot.avatar).toMatch(/^\/api\/avatar\/pixel\?v=/);
+
+	// Saving again without an avatar field keeps the image.
+	await command(ownerRequest(holder.current!, { type: "saveBot", id: bot.id, profile: { name: "Pixel", role: "Pixels", color: null } }));
+	expect((await boardView()).bots.find((item: any) => item.id === bot.id).avatar).toBe(bot.avatar);
+
+	const image = await avatarImage(new Request(`http://localhost:3000${bot.avatar}`, { headers: { Cookie: holder.current!.cookie } }), { params: Promise.resolve({ id: bot.id }) });
+	expect(image.status).toBe(200);
+	expect(image.headers.get("Content-Type")).toBe("image/png");
+	expect((await image.arrayBuffer()).byteLength).toBeGreaterThan(20);
+	const anonymous = await avatarImage(new Request(`http://localhost:3000${bot.avatar}`), { params: Promise.resolve({ id: bot.id }) });
+	expect(anonymous.status).toBe(401);
+
+	const html = await command(ownerRequest(holder.current!, { type: "saveBot", id: bot.id, profile: { name: "Pixel", role: "", avatar: "data:text/html;base64,PHNjcmlwdD4=", color: null } }));
+	expect(html.status).toBe(400);
+
+	const self = await call("update_my_profile", { bot: "Selfie", avatar: png });
+	expect(self.avatar).toMatch(/^http:\/\/localhost:3000\/api\/avatar\/selfie\?v=/);
+	const tooBig = await rpc("tools/call", { name: "update_my_profile", arguments: { bot: "Selfie", avatar: `data:image/png;base64,${"A".repeat(130_000)}` } });
+	expect(tooBig.body!.error ?? tooBig.body!.result.isError).toBeTruthy();
+});
+
+test("drops into In Progress and In Review respect queued and running cards", async () => {
+	const live = await call("create_card", { bot: "Ops", title: "with repo", repo: { url: "https://github.com/a/b" } });
+	const run = await command(ownerRequest(holder.current!, { type: "drop", cardId: live.card.id, column: "inProgress", index: 0 }));
+	const runBody = (await run.json()) as { board: any };
+	expect(cardIn(runBody.board, live.card.id)?.column).toBe("inProgress");
+	expect(runBody.board.agents.running).toBe(1);
+	expect(holder.current!.cursor.created).toHaveLength(1);
+
+	const refused = await command(ownerRequest(holder.current!, { type: "drop", cardId: live.card.id, column: "inReview", index: 0 }));
+	const refusedBody = (await refused.json()) as { board: any; notice: string };
+	expect(refusedBody.notice).toBe("Stop the agent before moving this card.");
+	expect((refusedBody as any).tone).toBe("warning");
+	expect(cardIn(refusedBody.board, live.card.id)?.column).toBe("inProgress");
+
+	// Fill the other two slots so the next run waits in Todo.
+	for (const title of ["two", "three"]) {
+		const extra = await call("create_card", { bot: "Ops", title, repo: { url: "https://github.com/a/b" } });
+		await command(ownerRequest(holder.current!, { type: "run", cardId: extra.card.id }));
+	}
+	const waiting = await call("create_card", { bot: "Ops", title: "waits", repo: { url: "https://github.com/a/b" } });
+	await command(ownerRequest(holder.current!, { type: "run", cardId: waiting.card.id }));
+	expect((await call("get_card", { card: waiting.card.id })).status).toBe("queued");
+	const pushed = await command(ownerRequest(holder.current!, { type: "drop", cardId: waiting.card.id, column: "inProgress", index: 0 }));
+	expect(((await pushed.json()) as { notice: string }).notice).toBe("This card is already waiting for an agent slot.");
+	expect((await call("get_card", { card: waiting.card.id })).status).toBe("queued");
+
+	const bot = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: waiting.card.id, to: "inProgress" } });
+	expect(bot.body!.result.isError).toBe(true);
+	expect(holder.current!.cursor.created).toHaveLength(3);
+});
+
+test("a command on a card that is gone says so and sends the fresh board", async () => {
+	const gone = await call("create_card", { bot: "Ops", title: "short lived" });
+	await command(ownerRequest(holder.current!, { type: "deleteCard", cardId: gone.card.id }));
+	for (const stale of [
+		{ type: "drop", cardId: gone.card.id, column: "done", index: 0 },
+		{ type: "run", cardId: gone.card.id },
+		{ type: "edit", cardId: gone.card.id, patch: { title: "again" } },
+	]) {
+		const response = await command(ownerRequest(holder.current!, stale));
+		expect(response.status).toBe(404);
+		const body = (await response.json()) as { board: any; notice: string };
+		expect(body.notice).toBe("That card or bot no longer exists. The board was refreshed.");
+		expect(cardIn(body.board, gone.card.id)).toBeNull();
+	}
+});
+
+test("a run that only queues is a warning, a run that starts is not", async () => {
+	const ids: string[] = [];
+	for (const title of ["a", "b", "c", "d"]) ids.push((await call("create_card", { bot: "Ops", title, repo: { url: "https://github.com/a/b" } })).card.id);
+	const tones: (string | null)[] = [];
+	for (const id of ids) tones.push(((await (await command(ownerRequest(holder.current!, { type: "run", cardId: id }))).json()) as { tone: string | null }).tone);
+	expect(tones).toEqual([null, null, null, "warning"]);
 });

@@ -149,7 +149,15 @@ export function memberOf(id: MemberId, bots: readonly BotProfile[]): MemberView 
 	}
 	const bot = bots.find((item) => item.id === id);
 	if (!bot) return { id, name: id, kind: "unknown", avatar: null, color: "#5b616b", initials: initialsOf(id) };
-	return { id, name: bot.name, kind: "bot", avatar: bot.avatar, color: bot.color, initials: initialsOf(bot.name) };
+	return { id, name: bot.name, kind: "bot", avatar: avatarUrl(bot), color: bot.color, initials: initialsOf(bot.name) };
+}
+
+/** An uploaded image is served from its own route, so a poll does not resend it once per card. */
+export function avatarUrl(bot: Pick<BotProfile, "id" | "avatar">): string | null {
+	if (!bot.avatar?.startsWith("data:")) return bot.avatar;
+	let hash = 2166136261;
+	for (let index = 0; index < bot.avatar.length; index += 7) hash = Math.imul(hash ^ bot.avatar.charCodeAt(index), 16777619);
+	return `/api/avatar/${encodeURIComponent(bot.id)}?v=${(hash >>> 0).toString(36)}-${bot.avatar.length}`;
 }
 
 export function initialsOf(name: string): string {

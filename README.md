@@ -54,8 +54,11 @@ Vercel Cron sends `Authorization: Bearer $CRON_SECRET` when that variable is set
 Drag a card by its body with a mouse, a long press on a touch screen, or Space and the arrow keys. Columns that can take the card light up while you drag. Dropping inside the same column reorders it, and the order is also the queue order for agents.
 
 - Todo or In Progress with a repo starts a run, the same as Run.
-- Todo without a repo parks the card there and says so.
-- In Review only fills from agent PRs. A running card has to be stopped before it moves.
+- Todo or In Progress without a repo moves the card there with no agent, so hand work can be tracked, and says so.
+- In Review always just moves the card. Agent PRs also land there on their own.
+- A card waiting for a slot stays out of In Progress until the agent takes one. A running card has to be stopped before it moves.
+
+When something you do does not go as expected, a toast at the bottom says why. Red is an error (the board refused it or could not be reached), yellow is a warning (it did less than it looked like, such as a drop that parked instead of running, or a running card you tried to drag or delete), and the deck color is a plain confirmation. Problems stay up longer and every toast can be closed with ×.
 
 The team dock on the left lists you and every bot with how many cards each holds. Click a face to see only that member's cards, or Unassigned. Drop a card on a face to assign it to that member. On a phone the dock is a strip under the header.
 
@@ -69,7 +72,7 @@ Each card shows the bot that filed it, a stripe in the color of the first assign
 
 Grok Bot has no settings form for custom servers. You ask a Bot in chat to add one, and for a server that needs a secret it recommends Remote HTTPS. **Bots & MCP → Connect Grok Bot** on the board has the message to send, with this deployment's URL filled in. When the Bot asks for the key, give the header name `Authorization` and the value `Bearer <BOT_TOKEN>`. Connectors are account-wide in Grok Bot, so one server entry serves every Bot.
 
-Because the connector is shared, the board cannot tell Bots apart by token. Every tool takes a `bot` argument instead: the calling Bot's own name. A new name joins the roster with a generated icon. Set a real icon in **Bots & MCP → Roster**, or let the Bot call `update_my_profile` with an emoji or an https image URL.
+Because the connector is shared, the board cannot tell Bots apart by token. Every tool takes a `bot` argument instead: the calling Bot's own name. A new name joins the roster with a generated icon. Grok Bot does not share profile images with connectors, so the board cannot pick up a Bot's icon by itself. Upload the image in **Bots & MCP → Roster** (it is cropped to a 128px square), or attach it to the message under **Connect Grok Bot** and let the Bot call `update_my_profile` with a base64 data URL. An emoji or an https image URL also works. Uploaded images are served from `/api/avatar/<bot id>` to the signed-in owner.
 
 | Tool | Writes | Purpose |
 | --- | --- | --- |
@@ -81,10 +84,10 @@ Because the connector is shared, the board cannot tell Bots apart by token. Ever
 | `update_card` | yes | Edit content. It has no column field |
 | `add_note` | yes | Append a signed, timestamped line to the notes |
 | `assign_card` | yes | Add, remove, or set assignees. With nothing given, it assigns the caller |
-| `move_card` | yes | Move to Inbox, Todo, Done, or Won't Do with a reason signed into the notes. Todo only parks |
+| `move_card` | yes | Move to any column with a reason signed into the notes. Never starts an agent, even in Todo or In Progress |
 | `update_my_profile` | yes | Name, role, icon, color |
 
-Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask. No tool starts, stops, or dequeues a Cursor agent. `move_card` refuses a card that is queued or running, and In Progress and In Review are set only by runs.
+Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask. No tool starts, stops, or dequeues a Cursor agent. `move_card` refuses a card that is queued or running.
 
 The same endpoint works from the xAI API as a remote MCP tool. Pass `server_url`, `server_label`, `authorization` with the token, and `allowed_tools` to keep a script read-only.
 

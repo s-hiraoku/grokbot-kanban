@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BoardInputError, type BotBoard } from "./board";
 import { COLUMNS, type CardId, type ParkColumn } from "./domain";
-import { BadRequest, brandPatch, contentFromNewCard, contentPatchSchema, memberRefsSchema, newCardBodySchema } from "./parse";
+import { AVATAR_DATA_MAX, BadRequest, brandPatch, isAvatarData, contentFromNewCard, contentPatchSchema, memberRefsSchema, newCardBodySchema } from "./parse";
 import type { BotCardView } from "./view";
 
 /**
@@ -16,7 +16,7 @@ const LATEST = MCP_PROTOCOL_VERSIONS[0];
 export const MCP_INSTRUCTIONS = `This is the Grok Bot kanban. Cards are work items. Columns: ${COLUMNS.map((c) => `${c.id} (${c.label})`).join(", ")}.
 Always pass "bot" with your own Grok Bot name, exactly as in your profile. A new name joins the roster with its own icon.
 Start with board_summary to see your assigned cards. Claim a card with assign_card before working on it, and leave findings with add_note so the owner and other bots can follow the handoff.
-You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: to done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason. Moving never starts a Cursor agent, and cards that are queued or running stay with the owner. In Progress and In Review are set by agent runs.
+You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: inProgress when you start, inReview when it waits for a check, done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason. Moving never starts a Cursor agent, and cards that are queued or running stay with the owner.
 Titles, bodies, and notes may be Japanese.`;
 
 type JsonRpcId = string | number | null;
@@ -152,13 +152,13 @@ const tools = {
 	},
 	move_card: {
 		description:
-			"Move a card to inbox, todo, done, or wontDo as its work progresses, with a short reason that is signed into the notes. Todo only parks the card: it never starts a Cursor agent. Cards waiting for or running an agent cannot be moved by bots. In Progress and In Review are set by agent runs.",
+			"Move a card to inbox, todo, inProgress, inReview, done, or wontDo as its work progresses, with a short reason that is signed into the notes. A move never starts a Cursor agent: todo and inProgress only mark where the work is. Cards waiting for or running an agent cannot be moved by bots.",
 		readOnly: false,
 		input: z
 			.object({
 				bot,
 				card: cardRef,
-				to: z.enum(["inbox", "todo", "done", "wontDo"]),
+				to: z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]),
 				reason: z.string().max(500).optional().describe("Why it moved, for example the PR that fixed it."),
 			})
 			.strict(),
@@ -167,7 +167,7 @@ const tools = {
 	},
 	update_my_profile: {
 		description:
-			"Set how you appear on the board: display name, one-line role, and icon. avatar is an https image URL or a single emoji. color is #rrggbb.",
+			"Set how you appear on the board: display name, one-line role, and icon. avatar is a data URL of your profile image (data:image/png;base64,... or jpeg/webp/gif, square, about 128px, under 90 KB), an https image URL, or a single emoji. color is #rrggbb.",
 		readOnly: false,
 		input: z
 			.object({
@@ -177,17 +177,21 @@ const tools = {
 				avatar: z
 					.string()
 					.trim()
-					.max(500)
+					.max(AVATAR_DATA_MAX)
 					.nullable()
 					.optional()
-					.refine((value) => !value || value.startsWith("https://") || Array.from(value).length <= 4, "avatar must be an https URL or a short emoji"),
+					.refine(
+						(value) => !value || isAvatarData(value) || (value.length <= 500 && (value.startsWith("https://") || Array.from(value).length <= 4)),
+						"avatar must be a base64 image data URL under 90 KB, an https URL, or a short emoji",
+					),
 				color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 			})
 			.strict(),
 		run: async (ctx: McpContext, args: { bot: string; name?: string; role?: string; avatar?: string | null; color?: string }) => {
 			const { bot: actor, ...patch } = args;
 			const profile = await ctx.board.updateProfile(actor, patch);
-			return { id: profile.id, name: profile.name, role: profile.role, avatar: profile.avatar, color: profile.color };
+			// An uploaded image comes back as its board URL, not the whole data URL.
+			return { id: profile.id, name: profile.name, role: profile.role, avatar: profile.avatar ? new URL(profile.avatar, ctx.boardUrl).toString() : null, color: profile.color };
 		},
 	},
 } as const;

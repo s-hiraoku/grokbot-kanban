@@ -40,7 +40,7 @@ import {
 
 export type NewCardInput = { externalId: string | null; content: CardContent };
 
-export type BotProfileInput = { name: string; role: string; avatar: string | null; color: string | null };
+export type BotProfileInput = { name: string; role: string; avatar?: string | null; color: string | null };
 
 export type OwnerCommand =
 	| { type: "create"; content: CardContent }
@@ -56,6 +56,8 @@ export type OwnerCommand =
 export type CommandResult = {
 	board: BoardView;
 	notice: string | null;
+	/** "warning" when the command went through but did not do what the drop or click suggests. */
+	tone?: "warning";
 	error: null | "not_found" | "busy" | "bad_request";
 };
 
@@ -72,6 +74,8 @@ export type OwnerBoard = {
 	view(): Promise<BoardView>;
 	sync(): Promise<BoardView>;
 	execute(command: OwnerCommand): Promise<CommandResult>;
+	/** The stored icon of a bot, for the image route. */
+	avatar(botId: string): Promise<string | null>;
 };
 
 export type CardFilter = {
@@ -139,6 +143,7 @@ type Applied =
 export function openBoard(deps: BoardDeps): BoardHandle {
 	const ownerApi: OwnerBoard = {
 		view: () => viewOf(deps),
+		avatar: async (botId) => (await deps.store.bot(botId))?.avatar ?? null,
 		sync: async () => {
 			await syncOnce(deps);
 			return viewOf(deps);
@@ -451,7 +456,7 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
 	if (applied.kind === "conflict") return { board: await viewOf(deps), notice: null, error: "busy" };
 	if (applied.kind === "rejected") {
-		return { board: await viewOf(deps), notice: noticeFor(applied), error: null };
+		return { board: await viewOf(deps), notice: noticeFor(applied), tone: "warning", error: null };
 	}
 	if (command.type === "run") await fillSlots(deps);
 	if (command.type === "stop" && applied.kind === "written" && applied.card.state.kind === "stopping") {
@@ -465,7 +470,9 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 	const outcome: CommandOutcome = state
 		? { kind: "settled", command: command.type, state }
 		: { kind: "missing" };
-	return { board: await viewOf(deps), notice: noticeFor(outcome), error: state ? null : "not_found" };
+	// A run that only queued, or whose launch is unconfirmed, did not start an agent yet.
+	const tone = command.type === "run" && state && state.kind !== "running" ? ("warning" as const) : undefined;
+	return { board: await viewOf(deps), notice: noticeFor(outcome), ...(tone ? { tone } : {}), error: state ? null : "not_found" };
 }
 
 async function saveBot(deps: BoardDeps, id: string | null, profile: BotProfileInput): Promise<CommandResult> {
@@ -476,7 +483,7 @@ async function saveBot(deps: BoardDeps, id: string | null, profile: BotProfileIn
 	const patch = cleanProfilePatch({
 		name,
 		role: profile.role,
-		avatar: profile.avatar || null,
+		...(profile.avatar === undefined ? {} : { avatar: profile.avatar || null }),
 		color: profile.color ?? colorFor(name),
 	});
 	if (id) {
@@ -498,7 +505,8 @@ async function saveBot(deps: BoardDeps, id: string | null, profile: BotProfileIn
 
 /**
  * A card dropped on a column at a position. Same column only reorders. Todo or In Progress with a repo
- * starts a run, as the Run button does. Todo without a repo parks the card instead of refusing the drop.
+ * starts a run, as the Run button does. Without a repo, Todo and In Progress park the card, so hand work
+ * can be tracked there. In Review always parks. A queued card dropped on In Progress stays queued.
  */
 async function drop(deps: BoardDeps, command: Extract<OwnerCommand, { type: "drop" }>): Promise<CommandResult> {
 	const card = await deps.store.get(command.cardId);
@@ -510,11 +518,14 @@ async function drop(deps: BoardDeps, command: Extract<OwnerCommand, { type: "dro
 	let parkedNotice: string | null = null;
 	if (from !== command.column) {
 		if (wantsRun && action.command === "run" && action.enabled && card.content.repo) event = { type: "run" };
-		else if (isParkColumn(command.column) && moveTargetsFor(card.state).includes(command.column)) {
+		else if (card.state.kind === "queued" && command.column === "inProgress") {
+			return { board: await viewOf(deps), notice: "This card is already waiting for an agent slot.", tone: "warning", error: null };
+		} else if (isParkColumn(command.column) && moveTargetsFor(card.state).includes(command.column)) {
 			event = { type: "move", to: command.column };
 			if (command.column === "todo" && !card.content.repo) parkedNotice = "Parked in Todo. Set a repo to run it.";
+			if (command.column === "inProgress" && !card.content.repo) parkedNotice = "Moved to In Progress without an agent. Set a repo to run one.";
 		} else {
-			return { board: await viewOf(deps), notice: dropRefusal(card, command.column), error: null };
+			return { board: await viewOf(deps), notice: dropRefusal(card), tone: "warning", error: null };
 		}
 	}
 	const all = await deps.store.all();
@@ -525,12 +536,11 @@ async function drop(deps: BoardDeps, command: Extract<OwnerCommand, { type: "dro
 	await deps.store.writeRank(card.id, rank);
 	if (!event) return { board: await viewOf(deps), notice: null, error: null };
 	const result = await executeChecked(deps, event.type === "run" ? { type: "run", cardId: card.id } : { type: "move", cardId: card.id, to: (event as { to: ParkColumn }).to });
-	return parkedNotice && !result.error ? { ...result, notice: parkedNotice } : result;
+	return parkedNotice && !result.error ? { ...result, notice: parkedNotice, tone: "warning" } : result;
 }
 
-function dropRefusal(card: Card, column: Column): string {
+function dropRefusal(card: Card): string {
 	if (isSlotHolder(card.state)) return noticeFor({ kind: "rejected", reason: "activeRun" }) ?? "";
-	if (column === "inReview") return "Cards reach In Review when an agent opens a PR.";
 	if (!card.content.repo) return noticeFor({ kind: "rejected", reason: "noRepo" }) ?? "";
 	return "This card is already queued for an agent.";
 }

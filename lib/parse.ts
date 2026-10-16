@@ -75,17 +75,28 @@ export const newCardBodySchema = z
 	})
 	.strict();
 
+/** About 90 KB of image once decoded. The board resizes uploads to 128px, which lands far below this. */
+export const AVATAR_DATA_MAX = 120_000;
+
+export function isAvatarData(value: string): boolean {
+	return /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value);
+}
+
 export const botProfileSchema = z
 	.object({
 		name: z.string().trim().min(1).max(40),
 		role: z.string().max(200).default(""),
+		// Omitted keeps the current icon. An uploaded image arrives as a small data URL the browser already resized.
 		avatar: z
 			.string()
 			.trim()
-			.max(500)
+			.max(AVATAR_DATA_MAX)
 			.nullable()
-			.default(null)
-			.refine((value) => value === null || value === "" || value.startsWith("https://") || Array.from(value).length <= 4, "avatar must be an https URL or a short emoji"),
+			.optional()
+			.refine(
+				(value) => value == null || value === "" || isAvatarData(value) || (value.length <= 500 && (value.startsWith("https://") || Array.from(value).length <= 4)),
+				"avatar must be an uploaded image, an https URL, or a short emoji",
+			),
 		color: z
 			.string()
 			.regex(/^#[0-9a-fA-F]{6}$/)
@@ -94,9 +105,10 @@ export const botProfileSchema = z
 	})
 	.strict();
 
+
 const columnSchema = z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]);
 
-const parkColumn = z.enum(["inbox", "todo", "done", "wontDo"]);
+const parkColumn = columnSchema;
 
 export const ownerCommandSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("create"), content: contentSchema }).strict(),
@@ -175,5 +187,5 @@ export function brandPatch(patch: z.infer<typeof contentPatchSchema>): ContentPa
 }
 
 export function isParkColumn(value: string): value is ParkColumn {
-	return value === "inbox" || value === "todo" || value === "done" || value === "wontDo";
+	return columnSchema.safeParse(value).success;
 }

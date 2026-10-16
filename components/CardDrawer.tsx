@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
 import { COLUMNS, type ParkColumn } from "@/lib/domain";
+import { actionBlocked } from "@/lib/dropRules";
+import type { ToastMessage } from "@/lib/notify";
 import type { CardView, MemberView } from "@/lib/view";
 
 const PRIORITIES = [
@@ -17,12 +19,14 @@ export default function CardDrawer({
 	card,
 	members,
 	send,
+	notify,
 	onSubmit,
 	onClose,
 }: {
 	card: CardView | null;
 	members: readonly MemberView[];
 	send: (command: Command) => Promise<boolean>;
+	notify: (message: ToastMessage) => void;
 	onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
 	onClose: () => void;
 }) {
@@ -149,8 +153,12 @@ export default function CardDrawer({
 									<button
 										type="button"
 										className={`run-button ${card.action.command}`}
-										disabled={!card.action.enabled}
-										onClick={() => void send({ type: card.action.command, cardId: card.id })}
+										aria-disabled={!card.action.enabled || undefined}
+										onClick={() => {
+											const reason = actionBlocked(card, card.action.command);
+											if (reason) notify({ text: reason, tone: "warning" });
+											else void send({ type: card.action.command, cardId: card.id });
+										}}
 									>
 										{card.action.command === "stop" ? "Stop agent" : card.action.label === "Re-run" ? "Re-run agent" : "Run agent"}
 									</button>
@@ -276,14 +284,17 @@ export default function CardDrawer({
 					<button type="button" className="ghost" onClick={onClose}>
 						{card && !dirty ? "Close" : "Cancel"}
 					</button>
-					{card && (card.column === "inProgress" || card.column === "inReview") ? <span className="muted small">Edits do not change a run already started.</span> : null}
+					{card && (card.pill !== null || card.links.agent !== null) ? <span className="muted small">Edits do not change a run already started.</span> : null}
 					{card ? (
 						<button
 							type="button"
 							className="ghost danger delete"
-							disabled={busy || card.pill !== null}
+							disabled={busy}
+							aria-disabled={card.pill !== null || undefined}
 							title={card.pill ? "Stop the agent before deleting this card." : "Delete this card"}
 							onClick={async () => {
+								const reason = actionBlocked(card, "delete");
+								if (reason) return notify({ text: reason, tone: "warning" });
 								if (!window.confirm(`Delete “${card.title}”? This cannot be undone.`)) return;
 								setBusy(true);
 								const ok = await send({ type: "deleteCard", cardId: card.id });
