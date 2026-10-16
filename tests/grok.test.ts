@@ -324,3 +324,36 @@ test("a bot without an icon is reminded to send its profile image until it does"
 	const summary = await rpc("tools/call", { name: "board_summary", arguments: { bot: "Another" } });
 	expect(summary.body!.result.structuredContent).not.toHaveProperty("nudge");
 });
+
+test("the owner has a default icon, can replace it, and never shows up as a bot", async () => {
+	const fresh = await boardView();
+	expect(fresh.owner.avatar).toBe("/api/avatar/owner?v=default");
+	const defaultImage = await avatarImage(new Request("http://localhost:3000/api/avatar/owner?v=default", { headers: { Cookie: holder.current!.cookie } }), { params: Promise.resolve({ id: "owner" }) });
+	expect(defaultImage.status).toBe(200);
+	expect(defaultImage.headers.get("Content-Type")).toBe("image/jpeg");
+
+	const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+	const saved = await command(ownerRequest(holder.current!, { type: "setOwnerAvatar", avatar: png }));
+	const savedBody = (await saved.json()) as any;
+	expect(savedBody.notice).toBe("Your icon is saved");
+	expect(savedBody.board.owner.avatar).toMatch(/^\/api\/avatar\/owner\?v=(?!default)/);
+	expect(savedBody.board.bots.some((bot: any) => bot.id === "owner")).toBe(false);
+	const uploaded = await avatarImage(new Request(`http://localhost:3000${savedBody.board.owner.avatar}`, { headers: { Cookie: holder.current!.cookie } }), { params: Promise.resolve({ id: "owner" }) });
+	expect(uploaded.headers.get("Content-Type")).toBe("image/png");
+
+	// Cards the owner holds carry the new icon, and bots never see the owner in their roster.
+	const card = await call("create_card", { bot: "Ops", title: "for you", assignees: ["owner"] });
+	expect(cardIn(savedBody.board, card.card.id)).toBeNull();
+	const after = await boardView();
+	expect((cardIn(after, card.card.id)!.card as any).assignees[0]).toMatchObject({ id: "owner", avatar: savedBody.board.owner.avatar });
+	expect((await call("list_bots", {})).bots.some((bot: any) => bot.id === "owner")).toBe(false);
+
+	// A bot named Owner gets its own id instead of taking over the owner's row.
+	await call("board_summary", { bot: "Owner" });
+	expect((await boardView()).bots.find((bot: any) => bot.name === "Owner")?.id).toBe("bot-owner");
+	expect((await command(ownerRequest(holder.current!, { type: "deleteBot", id: "owner" }))).status).toBe(400);
+
+	const reset = await command(ownerRequest(holder.current!, { type: "setOwnerAvatar", avatar: null }));
+	expect(((await reset.json()) as any).board.owner.avatar).toBe("/api/avatar/owner?v=default");
+	expect((await command(ownerRequest(holder.current!, { type: "setOwnerAvatar", avatar: "data:text/html;base64,PHNjcmlwdD4=" }))).status).toBe(400);
+});

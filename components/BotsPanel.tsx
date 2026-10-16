@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
 import type { ToastMessage } from "@/lib/notify";
-import type { BotView } from "@/lib/view";
+import type { BotView, MemberView } from "@/lib/view";
 
 const PALETTE = ["#7aa2ff", "#3dd68c", "#e2b340", "#e06c75", "#c678dd", "#56b6c2", "#f0883e", "#a3be8c"];
 
@@ -12,11 +12,13 @@ type Draft = { id: string | null; name: string; role: string; avatar: string; co
 
 export default function BotsPanel({
 	bots,
+	owner,
 	onClose,
 	send,
 	notify,
 }: {
 	bots: readonly BotView[];
+	owner: MemberView;
 	onClose: () => void;
 	send: (command: Command) => Promise<boolean>;
 	notify: (message: ToastMessage) => void;
@@ -78,6 +80,31 @@ export default function BotsPanel({
 				</header>
 				{tab === "roster" ? (
 					<div className="roster-list">
+						<div className="bot-row owner-row">
+							<MemberAvatar member={owner} size={34} />
+							<div className="bot-info">
+								<strong>Your icon</strong>
+								<span className="muted small">Shown on the cards you file or hold</span>
+							</div>
+							<label className="ghost small upload">
+								Upload image
+								<input
+									type="file"
+									accept="image/png,image/jpeg,image/webp,image/gif"
+									onChange={async (event) => {
+										const file = event.target.files?.[0];
+										event.target.value = "";
+										if (!file) return;
+										const avatar = await shrinkImage(file).catch(() => null);
+										if (avatar) void send({ type: "setOwnerAvatar", avatar });
+										else notify({ text: "That image could not be read. Try a PNG, JPEG, WebP or GIF.", tone: "error" });
+									}}
+								/>
+							</label>
+							<button type="button" className="ghost small" onClick={() => void send({ type: "setOwnerAvatar", avatar: null })}>
+								Default
+							</button>
+						</div>
 						{bots.length === 0 ? <p className="muted">No bots yet. A Grok Bot joins the roster the first time it calls the board with its name.</p> : null}
 						{bots.map((bot) =>
 							draft?.id === bot.id ? (

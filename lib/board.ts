@@ -1,5 +1,6 @@
 import { isBot, isCron, isOwner, type Bot, type Cron, type Owner } from "./auth";
 import { botIdFor, cleanBotName, colorFor, type BotProfile, type BotProfilePatch } from "./bots";
+import { DEFAULT_OWNER_AVATAR } from "./ownerAvatar";
 import type { CursorClient } from "./cursor";
 import {
 	COLUMNS,
@@ -51,7 +52,8 @@ export type OwnerCommand =
 	| { type: "drop"; cardId: CardId; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: BotProfileInput }
 	| { type: "deleteBot"; id: string }
-	| { type: "deleteCard"; cardId: CardId };
+	| { type: "deleteCard"; cardId: CardId }
+	| { type: "setOwnerAvatar"; avatar: string | null };
 
 export type CommandResult = {
 	board: BoardView;
@@ -143,7 +145,7 @@ type Applied =
 export function openBoard(deps: BoardDeps): BoardHandle {
 	const ownerApi: OwnerBoard = {
 		view: () => viewOf(deps),
-		avatar: async (botId) => (await deps.store.bot(botId))?.avatar ?? null,
+		avatar: async (botId) => (await deps.store.bot(botId))?.avatar ?? (botId === OWNER_MEMBER ? DEFAULT_OWNER_AVATAR : null),
 		sync: async () => {
 			await syncOnce(deps);
 			return viewOf(deps);
@@ -280,7 +282,7 @@ function botApi(deps: BoardDeps): BotBoard {
 		},
 		async roster() {
 			const cards = await store.all();
-			return (await store.bots()).map((bot) => toBotView(bot, cards, now()));
+			return (await rosterOf(store)).map((bot) => toBotView(bot, cards, now()));
 		},
 		async identify(actor) {
 			const bot = await touchBot(store, actor, now());
@@ -325,10 +327,15 @@ async function touchBot(store: Store, actor: string, at: Instant): Promise<BotPr
 	});
 }
 
+/** The bots, without the row that only holds the owner's uploaded icon. */
+async function rosterOf(store: Store): Promise<BotProfile[]> {
+	return (await store.bots()).filter((bot) => bot.id !== OWNER_MEMBER);
+}
+
 async function lookupBot(store: Store, ref: string): Promise<BotProfile | null> {
 	const needle = cleanBotName(ref).toLowerCase();
 	if (!needle) return null;
-	const roster = await store.bots();
+	const roster = await rosterOf(store);
 	return (
 		roster.find((bot) => bot.id === needle) ??
 		roster.find((bot) => bot.name.toLowerCase() === needle) ??
@@ -396,7 +403,16 @@ async function execute(deps: BoardDeps, command: OwnerCommand): Promise<CommandR
 async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<CommandResult> {
 	const members = (refs: readonly string[]) =>
 		resolveMembers(deps.store, refs, { actor: null, now: deps.now(), autoCreate: false });
+	if ((command.type === "saveBot" && command.id === OWNER_MEMBER) || (command.type === "deleteBot" && command.id === OWNER_MEMBER)) {
+		throw new BoardInputError("The owner is not a bot. Change your icon under Your icon.");
+	}
 	if (command.type === "saveBot") return saveBot(deps, command.id, command.profile);
+	if (command.type === "setOwnerAvatar") {
+		// The owner's icon lives in a reserved bots row, so no migration is needed. It never joins the roster.
+		await deps.store.ensureBot({ id: OWNER_MEMBER, name: "You", role: "", avatar: null, color: "#f2b33d", createdAt: deps.now(), lastSeenAt: null });
+		await deps.store.updateBot(OWNER_MEMBER, { avatar: command.avatar });
+		return { board: await viewOf(deps), notice: command.avatar ? "Your icon is saved" : "Your icon is back to the default", error: null };
+	}
 	if (command.type === "deleteCard") {
 		const card = await deps.store.get(command.cardId);
 		if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
