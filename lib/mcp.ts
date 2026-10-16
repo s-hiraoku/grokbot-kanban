@@ -15,6 +15,7 @@ const LATEST = MCP_PROTOCOL_VERSIONS[0];
 
 export const MCP_INSTRUCTIONS = `This is the Grok Bot kanban. Cards are work items. Columns: ${COLUMNS.map((c) => `${c.id} (${c.label})`).join(", ")}.
 Always pass "bot" with your own Grok Bot name, exactly as in your profile. A new name joins the roster with its own icon.
+The board cannot read your Grok Bot profile picture, so send it yourself: call update_my_profile with avatar set to your profile image as a data URL (or an https URL), once when you first connect and again whenever your picture changes. If you do not have the image, ask the owner to attach it in chat with you.
 Start with board_summary to see your assigned cards. Claim a card with assign_card before working on it, and leave findings with add_note so the owner and other bots can follow the handoff.
 You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: inProgress when you start, inReview when it waits for a check, done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason. Moving never starts a Cursor agent, and cards that are queued or running stay with the owner.
 Titles, bodies, and notes may be Japanese.`;
@@ -281,12 +282,27 @@ async function callTool(ctx: McpContext, params: unknown) {
 	}
 	try {
 		const result = await (tool.run as (ctx: McpContext, args: unknown) => Promise<unknown>)(ctx, parsed.data);
-		return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+		const content = [{ type: "text", text: JSON.stringify(result, null, 2) }];
+		const nudge = await iconNudge(ctx, parsed.data);
+		if (nudge) content.push({ type: "text", text: nudge });
+		return { content, structuredContent: result };
 	} catch (error) {
 		if (error instanceof BoardInputError || error instanceof NotFound) return toolError(error.message);
 		if (error instanceof BadRequest || error instanceof z.ZodError) return toolError("invalid arguments");
 		throw error;
 	}
+}
+
+export const ICON_NUDGE =
+	"Your icon on the board is still a placeholder. Call update_my_profile with avatar set to your Grok Bot profile image as a data URL (data:image/png;base64,..., square, about 128px, under 90 KB) or an https URL. If you do not have the image, ask the owner to attach it in chat with you.";
+
+/** Grok Bot never shares profile pictures with connectors, so a bot without an icon is reminded on every call until it sends one. */
+async function iconNudge(ctx: McpContext, args: unknown): Promise<string | null> {
+	const name = (args as { bot?: unknown } | null)?.bot;
+	if (typeof name !== "string" || !name.trim()) return null;
+	const needle = name.trim().toLowerCase();
+	const me = (await ctx.board.roster()).find((item) => item.name.toLowerCase() === needle || item.id === needle);
+	return me && !me.avatar ? ICON_NUDGE : null;
 }
 
 function compact(card: BotCardView, ctx: McpContext) {

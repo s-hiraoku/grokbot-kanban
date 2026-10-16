@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-	title: "Grok Bot",
+	title: "Grok Bot Kanban",
 	description: "Kanban for Grok Bot studio agents",
 };
 
