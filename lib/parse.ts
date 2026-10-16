@@ -82,21 +82,22 @@ export function isAvatarData(value: string): boolean {
 	return /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value);
 }
 
+const avatarSchema = z
+	.string()
+	.trim()
+	.max(AVATAR_DATA_MAX)
+	.nullable()
+	.refine(
+		(value) => value == null || value === "" || isAvatarData(value) || (value.length <= 500 && (value.startsWith("https://") || Array.from(value).length <= 4)),
+		"avatar must be an uploaded image, an https URL, or a short emoji",
+	);
+
 export const botProfileSchema = z
 	.object({
 		name: z.string().trim().min(1).max(40),
 		role: z.string().max(200).default(""),
 		// Omitted keeps the current icon. An uploaded image arrives as a small data URL the browser already resized.
-		avatar: z
-			.string()
-			.trim()
-			.max(AVATAR_DATA_MAX)
-			.nullable()
-			.optional()
-			.refine(
-				(value) => value == null || value === "" || isAvatarData(value) || (value.length <= 500 && (value.startsWith("https://") || Array.from(value).length <= 4)),
-				"avatar must be an uploaded image, an https URL, or a short emoji",
-			),
+		avatar: avatarSchema.optional(),
 		color: z
 			.string()
 			.regex(/^#[0-9a-fA-F]{6}$/)
@@ -122,6 +123,8 @@ export const ownerCommandSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("saveBot"), id: z.string().min(1).max(64).nullable(), profile: botProfileSchema }).strict(),
 	z.object({ type: z.literal("deleteBot"), id: z.string().min(1).max(64) }).strict(),
 	z.object({ type: z.literal("deleteCard"), cardId: z.string().uuid() }).strict(),
+	// null goes back to the default owner icon.
+	z.object({ type: z.literal("setOwnerAvatar"), avatar: avatarSchema }).strict(),
 ]);
 
 export function parseJson(raw: unknown): unknown {

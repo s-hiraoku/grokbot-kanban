@@ -185,13 +185,15 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	padding: 12px 8px;
 	border-right: 1px solid var(--line-soft);
 	background: var(--deck-2);
-	overflow-y: auto;
+	overflow: hidden;
 	min-height: 0;
 }
+.dock-head { flex: none; display: grid; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); }
+.dock-empty { margin: 8px 0; font-size: 11px; color: var(--faint); text-align: center; }
 .dock-hint { margin: 0 4px 2px; font-size: 11px; color: var(--muted); text-align: center; white-space: nowrap; }
 .is-dragging { user-select: none; }
 .is-dragging .dock-hint { color: var(--amber); }
-.dock-list { display: flex; flex-direction: column; gap: 4px; }
+.dock-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
 .dock-item {
 	position: relative;
 	display: grid;
@@ -239,7 +241,7 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 .is-dragging .dock-item:not(.dock-none) .dock-face .avatar { box-shadow: 0 0 0 2px var(--deck-2), 0 0 0 4px var(--line); }
 .dock-item.over { background: var(--deck); border-color: var(--member); }
 .dock-item.over .dock-face .avatar { transform: scale(1.12); box-shadow: 0 0 0 2px var(--deck-2), 0 0 0 4px var(--member), 0 0 22px var(--member) !important; }
-.dock-foot { margin-top: auto; display: grid; gap: 4px; padding-top: 10px; }
+.dock-foot { flex: none; display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
 .dock-foot .ghost { width: 100%; font-size: 12px; padding: 7px 4px; }
 .dock-foot form { margin: 0; }
 
@@ -797,7 +799,10 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 		padding: 8px 12px;
 	}
 	.dock-hint { display: none; }
-	.dock-list { flex-direction: row; }
+	.dock { overflow-x: auto; }
+	.dock-head, .dock-foot { border: 0; padding: 0; display: flex; align-items: center; }
+	.dock-list { flex-direction: row; overflow: visible; flex: none; }
+	.dock-empty { display: none; }
 	.dock-item { width: 72px; flex: none; }
 	.dock-foot { margin: 0 0 0 auto; padding: 0; display: flex; }
 	.dock-foot .ghost { width: auto; white-space: nowrap; }

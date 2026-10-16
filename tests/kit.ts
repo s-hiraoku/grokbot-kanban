@@ -75,7 +75,7 @@ export async function boot(): Promise<TestApp> {
 	};
 }
 
-export function ownerRequest(app: TestApp, body: OwnerCommand | Record<string, unknown>): Request {
+export function ownerRequest(app: TestApp, body: object): Request {
 	return new Request("http://localhost:3000/api/owner/commands", {
 		method: "POST",
 		headers: {

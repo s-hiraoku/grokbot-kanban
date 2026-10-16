@@ -26,6 +26,7 @@ export type BoardView = {
 	agents: { running: number; queued: number; capacity: number };
 	columns: readonly ColumnView[];
 	bots: readonly BotView[];
+	owner: { avatar: string };
 };
 
 export type MemberView = {
@@ -128,7 +129,8 @@ export function toBoardView(cards: readonly Card[], bots: readonly BotProfile[],
 	return {
 		agents: { running, queued, capacity: MAX_RUNNING },
 		columns,
-		bots: bots.map((bot) => toBotView(bot, cards, now)),
+		bots: bots.filter((bot) => bot.id !== OWNER_MEMBER).map((bot) => toBotView(bot, cards, now)),
+		owner: { avatar: ownerAvatarUrl(bots) },
 	};
 }
 
@@ -145,11 +147,17 @@ export function toBotView(bot: BotProfile, cards: readonly Card[], now: number):
 
 export function memberOf(id: MemberId, bots: readonly BotProfile[]): MemberView {
 	if (id === OWNER_MEMBER) {
-		return { id, name: "You", kind: "owner", avatar: null, color: "#d7c4a3", initials: "You" };
+		return { id, name: "You", kind: "owner", avatar: ownerAvatarUrl(bots), color: "#d7c4a3", initials: "You" };
 	}
 	const bot = bots.find((item) => item.id === id);
 	if (!bot) return { id, name: id, kind: "unknown", avatar: null, color: "#5b616b", initials: initialsOf(id) };
 	return { id, name: bot.name, kind: "bot", avatar: avatarUrl(bot), color: bot.color, initials: initialsOf(bot.name) };
+}
+
+/** The owner's uploaded icon, or the bundled default. Both are served from /api/avatar/owner. */
+export function ownerAvatarUrl(bots: readonly BotProfile[]): string {
+	const row = bots.find((bot) => bot.id === OWNER_MEMBER);
+	return row?.avatar ? (avatarUrl(row) ?? "/api/avatar/owner?v=default") : "/api/avatar/owner?v=default";
 }
 
 /** An uploaded image is served from its own route, so a poll does not resend it once per card. */

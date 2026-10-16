@@ -32,6 +32,8 @@ export function botIdFor(name: string): string {
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 32);
+	// "owner" is the human owner's own id, so a bot named Owner gets another one.
+	if (slug === "owner") return "bot-owner";
 	if (slug.length >= 2) return slug;
 	return `bot-${createHash("sha256").update(name.normalize("NFKC").trim()).digest("hex").slice(0, 8)}`;
 }

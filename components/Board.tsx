@@ -40,7 +40,8 @@ export type Command =
 	| { type: "drop"; cardId: string; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: Record<string, unknown> }
 	| { type: "deleteBot"; id: string }
-	| { type: "deleteCard"; cardId: string };
+	| { type: "deleteCard"; cardId: string }
+	| { type: "setOwnerAvatar"; avatar: string | null };
 
 type Order = Record<Column, string[]>;
 
@@ -135,7 +136,8 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	}, []);
 
 	const cards = useMemo(() => new Map<string, CardView>(board.columns.flatMap((column) => column.cards.map((card) => [card.id, card] as const))), [board]);
-	const members = useMemo<MemberView[]>(() => [OWNER, ...board.bots], [board.bots]);
+	const owner = useMemo<MemberView>(() => ({ ...OWNER, avatar: board.owner.avatar }), [board.owner.avatar]);
+	const members = useMemo<MemberView[]>(() => [owner, ...board.bots], [owner, board.bots]);
 	const activeCard = activeId ? cards.get(activeId) ?? null : null;
 	const allowed = activeCard ? dropTargets(activeCard) : null;
 
@@ -417,9 +419,12 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 				</header>
 
 				<nav className="dock" aria-label="Team">
-					<p className="dock-hint">{activeCard ? "Drop to assign" : "Team"}</p>
+					{/* Header and footer stay put; only the bots scroll between them. */}
+					<div className="dock-head">
+						<p className="dock-hint">{activeCard ? "Drop to assign" : "Team"}</p>
+						<DockMember member={owner} load={ownerLoad} active={memberFilter === OWNER.id} onClick={() => setMemberFilter((current) => (current === OWNER.id ? null : OWNER.id))} droppable={Boolean(activeCard)} />
+					</div>
 					<div className="dock-list">
-						<DockMember member={OWNER} load={ownerLoad} active={memberFilter === OWNER.id} onClick={() => setMemberFilter((current) => (current === OWNER.id ? null : OWNER.id))} droppable={Boolean(activeCard)} />
 						{board.bots.map((bot) => (
 							<DockMember
 								key={bot.id}
@@ -430,6 +435,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 								droppable={Boolean(activeCard)}
 							/>
 						))}
+						{board.bots.length === 0 ? <p className="dock-empty">No bots yet</p> : null}
+					</div>
+					<div className="dock-foot">
 						<button
 							type="button"
 							className={`dock-item dock-none${memberFilter === "none" ? " active" : ""}`}
@@ -443,8 +451,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 							<span className="dock-name">Unassigned</span>
 							<span className="dock-load">{unassigned}</span>
 						</button>
-					</div>
-					<div className="dock-foot">
 						<button type="button" className="ghost" onClick={() => setBotsOpen(true)}>
 							Bots & MCP
 						</button>
@@ -527,7 +533,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						}}
 					/>
 				) : null}
-				{botsOpen ? <BotsPanel bots={board.bots} onClose={() => setBotsOpen(false)} send={send} notify={notify} /> : null}
+				{botsOpen ? <BotsPanel bots={board.bots} owner={owner} onClose={() => setBotsOpen(false)} send={send} notify={notify} /> : null}
 				<Toasts toasts={toasts} onDismiss={dismiss} />
 			</div>
 		</DndContext>
