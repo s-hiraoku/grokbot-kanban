@@ -309,3 +309,18 @@ test("a run that only queues is a warning, a run that starts is not", async () =
 	for (const id of ids) tones.push(((await (await command(ownerRequest(holder.current!, { type: "run", cardId: id }))).json()) as { tone: string | null }).tone);
 	expect(tones).toEqual([null, null, null, "warning"]);
 });
+
+test("a bot without an icon is reminded to send its profile image until it does", async () => {
+	const { ICON_NUDGE, MCP_INSTRUCTIONS } = await import("@/lib/mcp");
+	expect(MCP_INSTRUCTIONS).toContain("update_my_profile");
+	const texts = async (name: string, args: Record<string, unknown>) =>
+		((await rpc("tools/call", { name, arguments: args })).body!.result.content as { text: string }[]).map((item) => item.text);
+
+	expect(await texts("board_summary", { bot: "Faceless" })).toContain(ICON_NUDGE);
+	const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+	expect(await texts("update_my_profile", { bot: "Faceless", avatar: png })).not.toContain(ICON_NUDGE);
+	expect(await texts("board_summary", { bot: "faceless" })).not.toContain(ICON_NUDGE);
+	// The structured result stays the tool's own answer.
+	const summary = await rpc("tools/call", { name: "board_summary", arguments: { bot: "Another" } });
+	expect(summary.body!.result.structuredContent).not.toHaveProperty("nudge");
+});
