@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import AssigneePicker from "@/components/AssigneePicker";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
 import { COLUMNS, type ParkColumn } from "@/lib/domain";
@@ -51,7 +52,8 @@ export default function CardDrawer({
 		if (!card) first.current?.focus();
 		else panel.current?.focus();
 		const onKey = (event: KeyboardEvent) => {
-			if (event.key === "Escape") onClose();
+			// An open menu inside the panel handles its own Escape first.
+			if (event.key === "Escape" && !event.defaultPrevented) onClose();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
@@ -90,7 +92,6 @@ export default function CardDrawer({
 	};
 	const dirty = card ? Object.keys(changes()).length > 0 : title.trim().length > 0;
 	const columnLabel = (id: string) => COLUMNS.find((column) => column.id === id)?.label ?? id;
-	const toggle = (id: string) => setAssignees((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
 
 	return (
 		<div className="drawer-scrim" onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -192,19 +193,10 @@ export default function CardDrawer({
 						</section>
 					) : null}
 
-					<fieldset className="field assign-field">
-						<legend>Assignees</legend>
-						<div className="chips">
-							{members.map((member) => (
-								<label key={member.id} className={`pick${assignees.includes(member.id) ? " on" : ""}`} style={{ "--member": member.color } as React.CSSProperties}>
-									<input type="checkbox" checked={assignees.includes(member.id)} onChange={() => toggle(member.id)} />
-									<MemberAvatar member={member} size={22} />
-									<span lang="ja">{member.name}</span>
-								</label>
-							))}
-						</div>
+					<div className="field assign-field">
+						<AssigneePicker members={members} selected={assignees} onChange={setAssignees} />
 						{members.length <= 1 ? <p className="muted small">Bots appear here once they use the board, or add one under Bots & MCP.</p> : null}
-					</fieldset>
+					</div>
 
 					<label className="field">
 						<span>Details</span>
