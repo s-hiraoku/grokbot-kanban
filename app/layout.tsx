@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Chakra_Petch, Noto_Sans_JP } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { THEME_SCRIPT } from "@/lib/theme-script";
 import "./globals.css";
 
 // Body text is mostly Japanese, so the board reads in Noto Sans JP. next/font serves it from the app itself,
@@ -15,13 +16,20 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-	themeColor: "#161c36",
-	colorScheme: "dark",
+	themeColor: [
+		{ media: "(prefers-color-scheme: light)", color: "#e7ebf4" },
+		{ media: "(prefers-color-scheme: dark)", color: "#161c36" },
+	],
+	colorScheme: "light dark",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
 	return (
-		<html lang="ja" className={`dark ${sans.variable} ${display.variable}`}>
+		// The theme script sets the dark class before React hydrates, so the class on <html> differs from the server's.
+		<html lang="ja" className={`${sans.variable} ${display.variable}`} suppressHydrationWarning>
+			<head>
+				<script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+			</head>
 			<body>
 				<TooltipProvider delayDuration={400}>{children}</TooltipProvider>
 			</body>

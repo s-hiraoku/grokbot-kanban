@@ -1,17 +1,76 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* The board is dark only; <html class="dark"> turns on shadcn/ui's dark styles whatever the OS setting. */
+/* <html class="dark"> turns on the dark palette and shadcn/ui's dark styles. A script in the layout sets it
+   before the first paint from the saved choice: light, dark, or the system setting. */
 @custom-variant dark (&:is(.dark *));
 
 /*
  * Dispatch board for one owner and a crew of Grok Bots.
- * Ink-blue deck, amber for the owner's hand (focus, primary actions), teal for runs and In Progress.
- * Bots bring their own colors. The shadcn/ui tokens below map onto that palette; the board is dark only.
+ * Amber for the owner's hand (focus, primary actions), teal for runs and In Progress, an ink-blue deck at night
+ * and a paper-white one by day. Bots bring their own colors. The shadcn/ui tokens below map onto that palette.
  */
 :root {
-	color-scheme: dark;
+	color-scheme: light;
 	--radius: 0.625rem;
+
+	--background: #f3f5fa;
+	--foreground: #172042;
+	--card: #ffffff;
+	--card-foreground: #172042;
+	--popover: #ffffff;
+	--popover-foreground: #172042;
+	--primary: #b56a00;
+	--primary-foreground: #ffffff;
+	--secondary: #e6eaf4;
+	--secondary-foreground: #172042;
+	--muted: #edf0f7;
+	--muted-foreground: #586184;
+	--accent: #eef1f9;
+	--accent-foreground: #172042;
+	--destructive: #c4382c;
+	--destructive-foreground: #ffffff;
+	--border: #dce1ee;
+	--input: #c9d0e3;
+	--ring: #b56a00;
+
+	--deck: #eef1f8;
+	--deck-2: #e7ebf4;
+	--line: #cdd4e6;
+	--faint: #7d86a6;
+	--soft-text: #3d4669;
+	--link: #2a52c4;
+	--amber-soft: #fdf0d2;
+	--amber-text: #7a4a00;
+	--amber-line: #ecc77a;
+	--teal: #0b8a6d;
+	--teal-soft: #dcf4ec;
+	--teal-text: #0a5f4c;
+	--teal-line: #8ccfbd;
+	--danger-soft: #fde5e1;
+	--danger-text: #8f2318;
+	--danger-line: #f1b3a9;
+	--ok-soft: #e1f3e4;
+	--ok-text: #1f6a32;
+	--card-hover-line: #aab4d0;
+	--drop: #e3e9fb;
+	--scrim: #0f163066;
+	--scrim-strong: #0f163099;
+	--shadow: #1720421f;
+	--avatar-text: #ffffff;
+	/* What an avatar sits on, so its ring and bot mark cut out cleanly. Cards and panels set their own. */
+	--surface: var(--deck-2);
+
+	--lamp-inbox: #6b7394;
+	--lamp-todo: #c98a0b;
+	--lamp-inProgress: #0f9f7f;
+	--lamp-inReview: #3d6fe0;
+	--lamp-done: #3c9a4b;
+	--lamp-wontDo: #d4483b;
+}
+
+.dark {
+	color-scheme: dark;
 
 	--background: #141a2e;
 	--foreground: #e6e9f5;
@@ -28,6 +87,7 @@
 	--accent: #28325a;
 	--accent-foreground: #e6e9f5;
 	--destructive: #ff8a7a;
+	--destructive-foreground: #2a0e0a;
 	--border: #2a3459;
 	--input: #34406a;
 	--ring: #f2b33d;
@@ -39,12 +99,23 @@
 	--soft-text: #c3c9e4;
 	--link: #b9cbff;
 	--amber-soft: #3b2f12;
+	--amber-text: #f6d48f;
+	--amber-line: #6b5520;
 	--teal: #5ee0c1;
 	--teal-soft: #173b3c;
+	--teal-text: #b5f3e3;
 	--teal-line: #2f6b64;
 	--danger-soft: #3d1f27;
-	/* What an avatar sits on, so its ring and bot mark cut out cleanly. Cards and panels set their own. */
-	--surface: var(--deck-2);
+	--danger-text: #ffd2ca;
+	--danger-line: #6e3340;
+	--ok-soft: #1f3a2e;
+	--ok-text: #c8f2d0;
+	--card-hover-line: #46538a;
+	--drop: #1f2848;
+	--scrim: #0a0e1c80;
+	--scrim-strong: #0a0e1cb8;
+	--shadow: #00000066;
+	--avatar-text: #10142a;
 
 	--lamp-inbox: #8f98bd;
 	--lamp-todo: #f2b33d;
@@ -95,6 +166,19 @@
 	--color-teal-soft: var(--teal-soft);
 	--color-teal-line: var(--teal-line);
 	--color-danger-soft: var(--danger-soft);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-amber-text: var(--amber-text);
+	--color-amber-line: var(--amber-line);
+	--color-teal-text: var(--teal-text);
+	--color-danger-text: var(--danger-text);
+	--color-danger-line: var(--danger-line);
+	--color-ok-soft: var(--ok-soft);
+	--color-ok-text: var(--ok-text);
+	--color-card-hover-line: var(--card-hover-line);
+	--color-drop: var(--drop);
+	--color-scrim: var(--scrim);
+	--color-scrim-strong: var(--scrim-strong);
+	--color-avatar-text: var(--avatar-text);
 
 	--animate-pulse-dot: pulse-dot 1.4s ease-in-out infinite;
 }

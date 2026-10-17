@@ -17,7 +17,7 @@ const SHAPE: Record<Size, string> = {
 	drawer: "h-8 gap-2 px-2.5 text-[13px] [&_svg]:size-3.5",
 };
 const TEAL = "border-teal-line bg-teal-soft text-teal hover:border-teal data-[state=open]:border-teal";
-const AMBER = "border-[#6b5520] bg-amber-soft text-primary hover:border-primary data-[state=open]:border-primary";
+const AMBER = "border-amber-line bg-amber-soft text-primary hover:border-primary data-[state=open]:border-primary";
 
 /**
  * Run on a card, in the board and in the drawer. With a Bot among the assignees, Run starts it straight

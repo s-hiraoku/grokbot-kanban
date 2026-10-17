@@ -27,6 +27,7 @@ import BotsPanel from "@/components/BotsPanel";
 import CardDrawer from "@/components/CardDrawer";
 import CardPanel, { type CardHandlers } from "@/components/CardPanel";
 import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
+import { ThemeMenu } from "@/components/ThemeMenu";
 import Toasts, { showToast } from "@/components/Toasts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -487,6 +488,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						<PlusIcon />
 						New card
 					</Button>
+					<ThemeMenu />
 				</header>
 
 				<nav
@@ -736,7 +738,7 @@ function ColumnShell({
 				"max-h-[calc(100dvh-220px)] flex-[0_0_calc(100vw-48px)] snap-start md:max-h-none md:max-w-[360px] md:min-w-[232px] md:flex-[1_1_232px]",
 				folded && "max-w-[52px] min-w-[52px] flex-[0_0_52px] md:max-w-[52px] md:min-w-[52px] md:flex-[0_0_52px]",
 				canDrop && "border-line",
-				canDrop && isOver && "border-primary bg-[#1f2848]",
+				canDrop && isOver && "border-primary bg-drop",
 			)}
 		>
 			<header className={cn("flex h-12 flex-none items-center gap-2 pr-2 pl-4 select-none", folded && "h-auto flex-col gap-2.5 px-0 py-3")}>

@@ -47,13 +47,13 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 			data-card-id={card.id}
 			data-priority={card.priority}
 			className={cn(
-				"group/card relative cursor-pointer touch-manipulation rounded-xl border border-line/70 bg-card py-3 pr-3 pl-[18px] shadow-[0_1px_2px_#0006] transition-colors outline-none select-none [--surface:var(--card)] [-webkit-touch-callout:none]",
+				"group/card relative cursor-pointer touch-manipulation rounded-xl border border-line/70 bg-card py-3 pr-3 pl-[18px] shadow-[0_1px_2px_var(--shadow)] transition-colors outline-none select-none [--surface:var(--card)] [-webkit-touch-callout:none]",
 				"before:absolute before:inset-y-3 before:left-[7px] before:w-[3px] before:rounded-full before:bg-(--stripe)",
 				!lead && "before:w-0 before:border-l-2 before:border-dashed before:border-line before:bg-transparent",
-				"hover:border-[#46538a] hover:bg-accent focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/40",
+				"hover:border-card-hover-line hover:bg-accent focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/40",
 				card.run?.status === "working" && "border-teal-line",
 				dragging && "border-dashed opacity-30",
-				overlay && "cursor-grabbing border-primary shadow-[0_18px_40px_#0009] transition-[transform,opacity] duration-150",
+				overlay && "cursor-grabbing border-primary shadow-[0_18px_40px_var(--shadow)] transition-[transform,opacity] duration-150",
 				overlay && toMember && "origin-top-left scale-50 opacity-85",
 				highlighted && "border-primary ring-[3px] ring-primary/25",
 				className,
@@ -83,12 +83,12 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				<span className={cn("contents", overlay && "pointer-events-none")}>
 					<RunControl card={card} bots={handlers.bots} cursorEnabled={handlers.cursorEnabled} size="card" send={handlers.send} />
 				</span>
-				{card.priority === "high" ? <Tag className="bg-danger-soft font-bold text-[#ffd2ca]">High</Tag> : null}
+				{card.priority === "high" ? <Tag className="bg-danger-soft font-bold text-danger-text">High</Tag> : null}
 				{card.priority === "low" ? <Tag className={cn("border bg-transparent text-muted-foreground", faded)}>Low</Tag> : null}
 				{card.repoLabel ? <Tag className={faded}>{card.repoLabel}</Tag> : null}
 				{card.kind.type === "voice" ? <Tag className={faded}>Voice {card.kind.seconds}s</Tag> : null}
 				{card.source ? <Tag className={faded}>{card.source}</Tag> : null}
-				{card.screened ? <Tag className={cn("bg-[#1f3a2e] text-[#c8f2d0]", faded)}>Screened</Tag> : null}
+				{card.screened ? <Tag className={cn("bg-ok-soft text-ok-text", faded)}>Screened</Tag> : null}
 			</div>
 			<footer className={cn("mt-3 flex min-h-6 items-center gap-2 border-t border-line/50 pt-2.5", faded)}>
 				<span className="mr-auto inline-flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground" title={card.createdBy ? `Filed by ${card.createdBy.name}` : "Filed over the API"}>

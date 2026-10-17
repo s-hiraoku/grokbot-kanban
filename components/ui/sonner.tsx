@@ -9,11 +9,14 @@ import {
 } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
-// The board is dark only, so the theme is fixed instead of read from next-themes.
+import { useTheme } from "@/lib/theme"
+
+// The board keeps its own theme choice instead of next-themes, so read it from there.
 const Toaster = ({ ...props }: ToasterProps) => {
+  const { dark } = useTheme()
   return (
     <Sonner
-      theme="dark"
+      theme={dark ? "dark" : "light"}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

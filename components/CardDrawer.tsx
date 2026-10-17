@@ -151,7 +151,7 @@ export default function CardDrawer({
 				<DialogPrimitive.Overlay
 					className={cn(
 						"fixed inset-0 z-40 data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
-						wide ? "bg-[#0a0e1cb8]" : "bg-[#0a0e1c80]",
+						wide ? "bg-scrim-strong" : "bg-scrim",
 					)}
 				/>
 				<DialogPrimitive.Content
@@ -276,7 +276,7 @@ export default function CardDrawer({
 									<p
 										className={cn(
 											"flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-[13px] leading-relaxed",
-											card.run.status === "working" ? "bg-teal-soft text-[#b5f3e3]" : "bg-amber-soft text-[#f6d48f]",
+											card.run.status === "working" ? "bg-teal-soft text-teal-text" : "bg-amber-soft text-amber-text",
 										)}
 										role="status"
 									>
@@ -292,7 +292,7 @@ export default function CardDrawer({
 									<p
 										className={cn(
 											"flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-[13px] leading-relaxed",
-											card.cursor.status === "running" ? "bg-teal-soft text-[#b5f3e3]" : "bg-amber-soft text-[#f6d48f]",
+											card.cursor.status === "running" ? "bg-teal-soft text-teal-text" : "bg-amber-soft text-amber-text",
 										)}
 										role="status"
 									>
@@ -380,7 +380,7 @@ export default function CardDrawer({
 											<ToggleGroupItem
 												key={item.id}
 												value={item.id}
-												className={cn("px-3.5 data-[state=on]:font-bold", item.id === "high" && "data-[state=on]:bg-danger-soft data-[state=on]:text-[#ffd2ca]")}
+												className={cn("px-3.5 data-[state=on]:font-bold", item.id === "high" && "data-[state=on]:bg-danger-soft data-[state=on]:text-danger-text")}
 											>
 												{item.label}
 											</ToggleGroupItem>
@@ -707,7 +707,7 @@ function NotesLog({ notes }: { notes: string }) {
 							<time className="font-display text-faint">{entry.stamp}</time>
 						</p>
 					) : null}
-					<p className="text-[13px] leading-[1.7] break-words text-[#cfd4ea] [&_a]:text-link">
+					<p className="text-[13px] leading-[1.7] break-words text-soft-text [&_a]:text-link">
 						{entry.lines.map((line, at) => (
 							<Fragment key={at}>
 								{at > 0 ? <br /> : null}
