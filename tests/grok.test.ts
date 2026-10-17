@@ -240,6 +240,30 @@ test("the owner deletes a card, and bots cannot", async () => {
 	expect(tools.map((tool) => tool.name).some((name) => name.includes("delete"))).toBe(false);
 });
 
+test("one coordinating Bot sees every Bot's run requests and passes them on", async () => {
+	const created = await call("create_card", { bot: "Ops", title: "for Ops", assignees: ["Ops"] });
+	await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: null }));
+
+	expect((await call("list_run_requests", { bot: "Kanban" })).count).toBe(0);
+	const all = await call("list_run_requests", { bot: "Kanban", everyone: true });
+	expect(all.cards.map((card: { id: string; run: { bot: string; passedOnBy: string | null } }) => [card.id, card.run.bot, card.run.passedOnBy])).toEqual([[created.card.id, "Ops", null]]);
+
+	const passed = await call("pass_run", { bot: "Kanban", card: created.card.id, note: "Asked Ops in the team chat" });
+	expect(passed.run).toMatchObject({ bot: "Ops", status: "requested", passedOnBy: "Kanban" });
+	expect(passed.notes).toMatch(/Kanban\] Passed the run on to Ops: Asked Ops in the team chat$/);
+	const view = cardIn(await boardView(), created.card.id)!;
+	expect((view.card as any).run).toMatchObject({ bot: { name: "Ops" }, passedOn: { by: { name: "Kanban" } } });
+
+	// Ops does the run itself; passing a run that has started, or one that is your own, is refused.
+	expect((await call("start_run", { bot: "Ops", card: created.card.id })).run).toMatchObject({ status: "working", passedOnBy: "Kanban" });
+	const late = await rpc("tools/call", { name: "pass_run", arguments: { bot: "Kanban", card: created.card.id } });
+	expect(late.body!.result.isError).toBe(true);
+	const own = await rpc("tools/call", { name: "pass_run", arguments: { bot: "Ops", card: created.card.id } });
+	expect(own.body!.result.isError).toBe(true);
+	expect((await call("finish_run", { bot: "Ops", card: created.card.id, outcome: "done", summary: "Done" })).column).toBe("done");
+	expect((await call("list_run_requests", { bot: "Kanban", everyone: true })).count).toBe(0);
+});
+
 test("an uploaded icon is stored once and served from its own URL", async () => {
 	const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 	const saved = await command(ownerRequest(holder.current!, { type: "saveBot", id: null, profile: { name: "Pixel", role: "", avatar: png, color: null } }));

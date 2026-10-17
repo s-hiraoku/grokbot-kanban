@@ -93,6 +93,7 @@ const botRunSchema = z.object({
 	status: z.enum(["requested", "working"]),
 	requestedAt: z.number(),
 	startedAt: z.number().nullable(),
+	passedOn: z.object({ by: z.string(), at: z.number() }).nullable().default(null),
 });
 const cursorRunSchema = z.object({
 	launchId: z.string(),

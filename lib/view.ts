@@ -56,7 +56,7 @@ export type CardView = {
 	kind: { type: "text" } | { type: "voice"; seconds: number };
 	links: { character: string | null; agent: string | null; pr: string | null };
 	/** The Grok Bot run this card waits on: requested until the bot picks it up, then working. */
-	run: { bot: MemberView; status: "requested" | "working"; since: string } | null;
+	run: { bot: MemberView; status: "requested" | "working"; since: string; passedOn: { by: MemberView; since: string } | null } | null;
 	/** The Cursor agent working on the card: launching until Cursor confirms it, then running. */
 	cursor: { status: "launching" | "running"; agentUrl: string | null; by: MemberView; since: string } | null;
 };
@@ -79,7 +79,7 @@ export type BotCardView = {
 	createdBy: { id: MemberId; name: string } | null;
 	agentUrl: string | null;
 	prUrl: string | null;
-	run: { bot: string; status: "requested" | "working"; requestedAt: string; startedAt: string | null } | null;
+	run: { bot: string; status: "requested" | "working"; requestedAt: string; startedAt: string | null; passedOnBy: string | null; passedOnAt: string | null } | null;
 	cursor: { status: "launching" | "running"; agentUrl: string | null; by: string; startedAt: string } | null;
 };
 
@@ -183,6 +183,7 @@ export function toCardView(card: Card, bots: readonly BotProfile[], now: number)
 					bot: memberOf(card.state.botRun.bot, bots),
 					status: card.state.botRun.status,
 					since: ageLabel(card.state.botRun.startedAt ?? card.state.botRun.requestedAt, now),
+					passedOn: card.state.botRun.passedOn ? { by: memberOf(card.state.botRun.passedOn.by, bots), since: ageLabel(card.state.botRun.passedOn.at, now) } : null,
 				}
 			: null,
 		cursor: card.state.cursorRun
@@ -223,6 +224,8 @@ export function toBotCard(card: Card, bots: readonly BotProfile[]): BotCardView 
 					status: card.state.botRun.status,
 					requestedAt: new Date(card.state.botRun.requestedAt).toISOString(),
 					startedAt: card.state.botRun.startedAt === null ? null : new Date(card.state.botRun.startedAt).toISOString(),
+					passedOnBy: card.state.botRun.passedOn ? memberOf(card.state.botRun.passedOn.by, bots).name : null,
+					passedOnAt: card.state.botRun.passedOn ? new Date(card.state.botRun.passedOn.at).toISOString() : null,
 				}
 			: null,
 		cursor: card.state.cursorRun

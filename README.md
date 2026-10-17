@@ -86,7 +86,8 @@ Because the connector is shared, the board cannot tell Bots apart by token. Ever
 | `list_cards` | no | Filter by column, assignee (`me`, `owner`, a bot name), unassigned, or text |
 | `get_card` | no | One card in full. Takes the UUID or the short id shown on the card |
 | `list_bots` | no | Roster with roles and load |
-| `list_run_requests` | no | Cards the owner asked the caller to run, oldest first |
+| `list_run_requests` | no | Cards the owner asked the caller to run, oldest first; `everyone: true` lists every Bot's, for a coordinating Bot |
+| `pass_run` | yes | A coordinating Bot records that it passed a run request on to the Bot it is for |
 | `create_card` | yes | File a card in Inbox. `externalId` makes retries return the same card |
 | `update_card` | yes | Edit content. It has no column field |
 | `add_note` | yes | Append a signed, timestamped line to the notes |

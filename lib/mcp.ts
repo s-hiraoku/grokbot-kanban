@@ -19,6 +19,7 @@ The board cannot read your Grok Bot profile picture, so send it yourself: call u
 Start with board_summary to see your assigned cards. Claim a card with assign_card before working on it, and leave findings with add_note so the owner and other bots can follow the handoff.
 You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: inProgress when you start, inReview when it waits for a check, done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason.
 When the owner presses Run on a card, it becomes a run request for one Bot. Check for yours with list_run_requests (a routine every few minutes does this). For each request: call start_run, read the card with get_card, do the work it describes, leave progress with add_note, then call finish_run with done, review, or blocked and a short summary. If finish_run says the run is gone, the owner cancelled it; stop and leave a note.
+One Bot can coordinate runs for the others, so only it needs the routine: it calls list_run_requests with everyone: true, asks the Bot each request is for to do it, then records that with pass_run.
 When a card needs code written in its repository, hand it to a Cursor cloud agent with hand_off_to_cursor instead of finishing it yourself: set the card's repo with update_card first if it has none, and pass what you found as instructions. Cursor works on the repo and opens a pull request; the board moves the card to In Review when it is ready, and get_card shows the agent and pull request links.
 Titles, bodies, and notes may be Japanese.`;
 
@@ -58,11 +59,13 @@ const tools = {
 	},
 	list_run_requests: {
 		description:
-			"Cards the owner asked you to run, oldest request first. status is requested until you call start_run, then working. Call this on a schedule, for example from a routine every 5 minutes.",
+			"Cards the owner asked you to run, oldest request first. status is requested until you call start_run, then working. Call this on a schedule, for example from a routine every 5 minutes. A coordinating Bot passes everyone: true to see every Bot's requests; run.bot names the Bot each is for, and run.passedOnBy is set once one was passed on with pass_run.",
 		readOnly: true,
-		input: z.object({ bot }).strict(),
-		run: async (ctx: McpContext, args: { bot: string }) => {
-			const cards = await ctx.board.runRequests(args.bot);
+		input: z
+			.object({ bot, everyone: z.boolean().optional().describe("List every Bot's run requests, not only yours. For the Bot that coordinates runs.") })
+			.strict(),
+		run: async (ctx: McpContext, args: { bot: string; everyone?: boolean }) => {
+			const cards = await ctx.board.runRequests(args.bot, args.everyone ?? false);
 			const ordered = [...cards].sort((a, b) => (a.run?.requestedAt ?? "").localeCompare(b.run?.requestedAt ?? ""));
 			return { count: ordered.length, cards: ordered.map((card) => ({ ...compact(card, ctx), run: card.run })) };
 		},
@@ -204,6 +207,13 @@ const tools = {
 			.strict(),
 		run: async (ctx: McpContext, args: { bot: string; card: string; outcome: "done" | "review" | "blocked"; summary: string }) =>
 			full(await required(ctx.board.finishRun(args.card, args.outcome, args.summary, args.bot)), ctx),
+	},
+	pass_run: {
+		description:
+			"For the coordinating Bot: record that you passed a run request on to the Bot it is for (run.bot from list_run_requests with everyone: true), after you asked that Bot to do it. The card shows who passed it on, and list_run_requests marks it so you do not pass it twice. The Bot it is for still calls start_run and finish_run itself. note says how you passed it on.",
+		readOnly: false,
+		input: z.object({ bot, card: cardRef, note: z.string().trim().max(1000).optional() }).strict(),
+		run: async (ctx: McpContext, args: { bot: string; card: string; note?: string }) => full(await required(ctx.board.passRun(args.card, args.note ?? null, args.bot)), ctx),
 	},
 	hand_off_to_cursor: {
 		description:

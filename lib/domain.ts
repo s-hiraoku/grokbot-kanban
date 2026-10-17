@@ -85,6 +85,8 @@ export type BotRun = {
 	status: "requested" | "working";
 	requestedAt: Instant;
 	startedAt: Instant | null;
+	/** A coordinating Bot that picked up the request and passed it on to `bot`. */
+	passedOn: { by: MemberId; at: Instant } | null;
 };
 
 /**

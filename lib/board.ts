@@ -101,7 +101,10 @@ export type BotBoard = {
 	assign(ref: string, change: AssignChange, actor: string | null): Promise<BotCardView | null>;
 	addNote(ref: string, text: string, actor: string | null): Promise<BotCardView | null>;
 	move(ref: string, to: ParkColumn, reason: string | null, actor: string | null): Promise<BotCardView | null>;
-	runRequests(actor: string): Promise<BotCardView[]>;
+	/** The calling bot's run requests, or with `everyone` every Bot's, for a coordinating Bot to pass on. */
+	runRequests(actor: string, everyone?: boolean): Promise<BotCardView[]>;
+	/** A coordinating Bot records that it passed a request on to the Bot it is for. */
+	passRun(ref: string, note: string | null, actor: string): Promise<BotCardView | null>;
 	startRun(ref: string, actor: string): Promise<BotCardView | null>;
 	finishRun(ref: string, outcome: RunOutcome, summary: string, actor: string): Promise<BotCardView | null>;
 	/** Hands the card to a Cursor agent, ending the calling bot's own run on it if it had one. */
@@ -258,10 +261,28 @@ function botApi(deps: BoardDeps): BotBoard {
 			const notes = fresh.content.notes ? `${fresh.content.notes}\n${line}` : line;
 			return updateCard(fresh, { notes: notes.slice(-20_000) });
 		},
-		async runRequests(actor) {
+		async runRequests(actor, everyone = false) {
 			const bot = await touchBot(store, actor, now());
 			const roster = await store.bots();
-			return (await store.all()).filter((card) => card.state.botRun?.bot === bot.id).map((card) => toBotCard(card, roster));
+			return (await store.all()).filter((card) => (everyone ? card.state.botRun : card.state.botRun?.bot === bot.id)).map((card) => toBotCard(card, roster));
+		},
+		async passRun(ref, note, actor) {
+			const bot = await touchBot(store, actor, now());
+			const card = await findCard(store, ref);
+			if (!card) return null;
+			const run = card.state.botRun;
+			if (!run) throw new BoardInputError("This card has no run request. It may have been cancelled by the owner.");
+			const roster = await store.bots();
+			const target = roster.find((item) => item.id === run.bot)?.name ?? run.bot;
+			if (run.bot === bot.id) throw new BoardInputError("This run is for you. Call start_run and do it yourself.");
+			if (run.status === "working") throw new BoardInputError(`${target} has already started this run.`);
+			const at = now();
+			const applied = await changeState(deps, card.id, (state) =>
+				state.botRun?.status === "requested" && state.botRun.bot === run.bot ? { ...state, botRun: { ...state.botRun, passedOn: { by: bot.id, at } } } : null,
+			);
+			if (applied.kind === "conflict") throw new BoardInputError("The board is busy. Try again.");
+			if (applied.kind === "missing") return null;
+			return noted(store, applied.card, bot.name, at, `Passed the run on to ${target}${note?.trim() ? `: ${note.trim()}` : ""}`);
 		},
 		async startRun(ref, actor) {
 			const bot = await touchBot(store, actor, now());
@@ -538,7 +559,7 @@ async function requestRun(deps: BoardDeps, cardId: CardId, botId: string | null)
 	}
 	const at = deps.now();
 	const applied = await changeState(deps, card.id, (state) =>
-		state.botRun || state.cursorRun ? null : { ...state, column: "inProgress", botRun: { bot: bot.id, status: "requested", requestedAt: at, startedAt: null } },
+		state.botRun || state.cursorRun ? null : { ...state, column: "inProgress", botRun: { bot: bot.id, status: "requested", requestedAt: at, startedAt: null, passedOn: null } },
 	);
 	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
 	if (applied.kind !== "written") return { board: await viewOf(deps), notice: null, error: "busy" };
