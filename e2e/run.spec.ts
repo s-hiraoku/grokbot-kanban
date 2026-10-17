@@ -60,3 +60,21 @@ test("a running card's badge cancels the run", async ({ page, request }) => {
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", "Todo");
 	await expect(cardTitled(page, title).getByRole("button", { name: "Run", exact: true })).toBeVisible();
 });
+
+test("a run passed on by the coordinating Bot says who passed it, until the Bot it is for starts", async ({ page, request }) => {
+	const title = `passed ${unique()}`;
+	const created = await tool(request, "create_card", { bot: "Ops", title, assignees: ["Ops"] });
+	await signIn(page);
+	await cardTitled(page, title).getByRole("button", { name: "Run", exact: true }).click();
+	await expect(runStatus(page, title)).toHaveText("Run requested");
+
+	await tool(request, "pass_run", { bot: "Kanban", card: created.card.id, note: "Sent with SendToAgent" });
+	await page.reload();
+	await cardTitled(page, title).getByRole("button", { name: /Waiting for Ops/ }).click();
+	await expect(openMenu(page)).toContainText("Kanban passed it on to Ops just now. Waiting for Ops to start.");
+	await page.keyboard.press("Escape");
+
+	await tool(request, "start_run", { bot: "Ops", card: created.card.id });
+	await page.reload();
+	await expect(runStatus(page, title)).toHaveText("Running");
+});
