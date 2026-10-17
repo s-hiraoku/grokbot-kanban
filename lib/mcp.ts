@@ -18,6 +18,7 @@ Always pass "bot" with your own Grok Bot name, exactly as in your profile. A new
 The board cannot read your Grok Bot profile picture, so send it yourself: call update_my_profile with avatar set to your profile image as a data URL (or an https URL), once when you first connect and again whenever your picture changes. If you do not have the image, ask the owner to attach it in chat with you.
 Start with board_summary to see your assigned cards. Claim a card with assign_card before working on it, and leave findings with add_note so the owner and other bots can follow the handoff.
 You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: inProgress when you start, inReview when it waits for a check, done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason.
+When the owner presses Run on a card, it becomes a run request for one Bot. Check for yours with list_run_requests (a routine every few minutes does this). For each request: call start_run, read the card with get_card, do the work it describes, leave progress with add_note, then call finish_run with done, review, or blocked and a short summary. If finish_run says the run is gone, the owner cancelled it; stop and leave a note.
 Titles, bodies, and notes may be Japanese.`;
 
 type JsonRpcId = string | number | null;
@@ -42,12 +43,27 @@ const editable = contentPatchSchema.innerType().omit({ notes: true, assignees: t
 const tools = {
 	board_summary: {
 		description:
-			"Counts per column and the cards assigned to you. Call this first in a session.",
+			"Counts per column, the cards assigned to you, and the runs the owner asked you to do. Call this first in a session.",
 		readOnly: true,
 		input: z.object({ bot: bot.optional() }).strict(),
 		run: async (ctx: McpContext, args: { bot?: string }) => {
 			const summary = await ctx.board.summary(args.bot ?? null);
-			return { ...summary, mine: summary.mine.map((card) => compact(card, ctx)) };
+			return {
+				...summary,
+				runRequests: summary.runRequests.map((card) => ({ ...compact(card, ctx), run: card.run })),
+				mine: summary.mine.map((card) => compact(card, ctx)),
+			};
+		},
+	},
+	list_run_requests: {
+		description:
+			"Cards the owner asked you to run, oldest request first. status is requested until you call start_run, then working. Call this on a schedule, for example from a routine every 5 minutes.",
+		readOnly: true,
+		input: z.object({ bot }).strict(),
+		run: async (ctx: McpContext, args: { bot: string }) => {
+			const cards = await ctx.board.runRequests(args.bot);
+			const ordered = [...cards].sort((a, b) => (a.run?.requestedAt ?? "").localeCompare(b.run?.requestedAt ?? ""));
+			return { count: ordered.length, cards: ordered.map((card) => ({ ...compact(card, ctx), run: card.run })) };
 		},
 	},
 	list_cards: {
@@ -165,6 +181,28 @@ const tools = {
 			.strict(),
 		run: async (ctx: McpContext, args: { bot: string; card: string; to: ParkColumn; reason?: string }) =>
 			full(await required(ctx.board.move(args.card, args.to, args.reason ?? null, args.bot)), ctx),
+	},
+	start_run: {
+		description:
+			"Take a run request the owner gave you. The card moves to In Progress and shows you working. Then read it with get_card and do the work.",
+		readOnly: false,
+		input: z.object({ bot, card: cardRef }).strict(),
+		run: async (ctx: McpContext, args: { bot: string; card: string }) => full(await required(ctx.board.startRun(args.card, args.bot)), ctx),
+	},
+	finish_run: {
+		description:
+			"End your run on a card. outcome done moves it to Done, review to In Review (waiting for the owner's check), blocked back to Todo. summary is signed into the notes: what you did, links to results, and what is left.",
+		readOnly: false,
+		input: z
+			.object({
+				bot,
+				card: cardRef,
+				outcome: z.enum(["done", "review", "blocked"]),
+				summary: z.string().trim().min(1).max(4000),
+			})
+			.strict(),
+		run: async (ctx: McpContext, args: { bot: string; card: string; outcome: "done" | "review" | "blocked"; summary: string }) =>
+			full(await required(ctx.board.finishRun(args.card, args.outcome, args.summary, args.bot)), ctx),
 	},
 	update_my_profile: {
 		description:

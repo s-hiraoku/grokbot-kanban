@@ -53,6 +53,8 @@ export type CardView = {
 	originalLink: string | null;
 	kind: { type: "text" } | { type: "voice"; seconds: number };
 	links: { character: string | null; agent: string | null; pr: string | null };
+	/** The Grok Bot run this card waits on: requested until the bot picks it up, then working. */
+	run: { bot: MemberView; status: "requested" | "working"; since: string } | null;
 };
 
 export type BotCardView = {
@@ -73,6 +75,7 @@ export type BotCardView = {
 	createdBy: { id: MemberId; name: string } | null;
 	agentUrl: string | null;
 	prUrl: string | null;
+	run: { bot: string; status: "requested" | "working"; requestedAt: string; startedAt: string | null } | null;
 };
 
 export function toBoardView(cards: readonly Card[], bots: readonly BotProfile[], now: number): BoardView {
@@ -169,6 +172,13 @@ export function toCardView(card: Card, bots: readonly BotProfile[], now: number)
 			agent: agentHref(card.state),
 			pr: prHref(card.state),
 		},
+		run: card.state.botRun
+			? {
+					bot: memberOf(card.state.botRun.bot, bots),
+					status: card.state.botRun.status,
+					since: ageLabel(card.state.botRun.startedAt ?? card.state.botRun.requestedAt, now),
+				}
+			: null,
 	};
 }
 
@@ -193,6 +203,14 @@ export function toBotCard(card: Card, bots: readonly BotProfile[]): BotCardView 
 		createdBy: card.createdBy ? { id: card.createdBy, name: memberOf(card.createdBy, bots).name } : null,
 		agentUrl: agentHref(card.state),
 		prUrl: prHref(card.state),
+		run: card.state.botRun
+			? {
+					bot: memberOf(card.state.botRun.bot, bots).name,
+					status: card.state.botRun.status,
+					requestedAt: new Date(card.state.botRun.requestedAt).toISOString(),
+					startedAt: card.state.botRun.startedAt === null ? null : new Date(card.state.botRun.startedAt).toISOString(),
+				}
+			: null,
 	};
 }
 

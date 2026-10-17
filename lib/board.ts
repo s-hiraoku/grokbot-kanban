@@ -11,6 +11,7 @@ import {
 	type Card,
 	type CardContent,
 	type CardId,
+	type CardState,
 	type Column,
 	type ContentPatch,
 	type Instant,
@@ -28,6 +29,9 @@ export type OwnerCommand =
 	| { type: "create"; content: CardContent }
 	| { type: "edit"; cardId: CardId; patch: ContentPatch }
 	| { type: "move"; cardId: CardId; to: ParkColumn }
+	/** Ask a Grok Bot to run the card. Without a bot, the first bot assigned to the card. */
+	| { type: "run"; cardId: CardId; bot: string | null }
+	| { type: "stop"; cardId: CardId }
 	| { type: "drop"; cardId: CardId; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: BotProfileInput }
 	| { type: "deleteBot"; id: string }
@@ -67,6 +71,8 @@ export type CardFilter = {
 export type AssignChange = { add?: readonly string[]; remove?: readonly string[]; set?: readonly string[] };
 
 export type BoardSummary = {
+	/** Cards the owner asked the calling bot to run. */
+	runRequests: BotCardView[];
 	columns: { id: Column; label: string; count: number }[];
 	mine: BotCardView[];
 	unassignedInbox: number;
@@ -85,10 +91,21 @@ export type BotBoard = {
 	assign(ref: string, change: AssignChange, actor: string | null): Promise<BotCardView | null>;
 	addNote(ref: string, text: string, actor: string | null): Promise<BotCardView | null>;
 	move(ref: string, to: ParkColumn, reason: string | null, actor: string | null): Promise<BotCardView | null>;
+	runRequests(actor: string): Promise<BotCardView[]>;
+	startRun(ref: string, actor: string): Promise<BotCardView | null>;
+	finishRun(ref: string, outcome: RunOutcome, summary: string, actor: string): Promise<BotCardView | null>;
 	roster(): Promise<BotView[]>;
 	identify(actor: string): Promise<BotView>;
 	updateProfile(actor: string, patch: BotProfilePatch): Promise<BotView>;
 	summary(actor: string | null): Promise<BoardSummary>;
+};
+
+/** How a bot ends a run: done moves the card to Done, review to In Review, blocked back to Todo. */
+export type RunOutcome = "done" | "review" | "blocked";
+const OUTCOME: Record<RunOutcome, { column: Column; label: string }> = {
+	done: { column: "done", label: "finished" },
+	review: { column: "inReview", label: "ready for review" },
+	blocked: { column: "todo", label: "blocked" },
 };
 
 export type BoardDeps = {
@@ -221,6 +238,37 @@ function botApi(deps: BoardDeps): BotBoard {
 			const notes = fresh.content.notes ? `${fresh.content.notes}\n${line}` : line;
 			return updateCard(fresh, { notes: notes.slice(-20_000) });
 		},
+		async runRequests(actor) {
+			const bot = await touchBot(store, actor, now());
+			const roster = await store.bots();
+			return (await store.all()).filter((card) => card.state.botRun?.bot === bot.id).map((card) => toBotCard(card, roster));
+		},
+		async startRun(ref, actor) {
+			const bot = await touchBot(store, actor, now());
+			const card = await findCard(store, ref);
+			if (!card) return null;
+			const run = card.state.botRun;
+			if (run?.bot !== bot.id) throw new BoardInputError(`This card has no run for ${bot.name}. Call list_run_requests for yours.`);
+			if (run.status === "working") return toBotCard(card, await store.bots());
+			const at = now();
+			const applied = await changeState(deps, card.id, (state) =>
+				state.botRun?.bot === bot.id ? { ...state, column: "inProgress", botRun: { ...state.botRun, status: "working", startedAt: at } } : null,
+			);
+			if (applied.kind === "conflict") throw new BoardInputError("The board is busy. Try again.");
+			if (applied.kind === "missing") return null;
+			return noted(store, applied.card, bot.name, at, "Started the run");
+		},
+		async finishRun(ref, outcome, summary, actor) {
+			const bot = await touchBot(store, actor, now());
+			const card = await findCard(store, ref);
+			if (!card) return null;
+			if (card.state.botRun?.bot !== bot.id) throw new BoardInputError(`This card has no run for ${bot.name}. It may have been cancelled by the owner.`);
+			const { column, label } = OUTCOME[outcome];
+			const applied = await changeState(deps, card.id, (state) => (state.botRun?.bot === bot.id ? { ...state, column, botRun: null } : null));
+			if (applied.kind === "conflict") throw new BoardInputError("The board is busy. Try again.");
+			if (applied.kind === "missing") return null;
+			return noted(store, applied.card, bot.name, now(), `Run ${label}: ${summary.trim()}`);
+		},
 		async roster() {
 			const cards = await store.all();
 			return (await rosterOf(store)).map((bot) => toBotView(bot, cards, now()));
@@ -241,6 +289,7 @@ function botApi(deps: BoardDeps): BotBoard {
 			const roster = await store.bots();
 			const view = toBoardView(cards, roster, now());
 			return {
+				runRequests: bot ? cards.filter((card) => card.state.botRun?.bot === bot.id).map((card) => toBotCard(card, roster)) : [],
 				columns: view.columns.map((column) => ({ id: column.id, label: column.label, count: column.count })),
 				mine: bot
 					? cards.filter((card) => card.content.assignees.includes(bot.id)).map((card) => toBotCard(card, roster))
@@ -370,6 +419,8 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 		return { board: await viewOf(deps), notice: "Bot removed", error: null };
 	}
 	if (command.type === "drop") return drop(deps, command);
+	if (command.type === "run") return requestRun(deps, command.cardId, command.bot);
+	if (command.type === "stop") return cancelRun(deps, command.cardId);
 	if (command.type === "create") {
 		const ranks = (await deps.store.all()).map((card) => card.rank);
 		await deps.store.insert({
@@ -434,11 +485,64 @@ async function drop(deps: BoardDeps, command: Extract<OwnerCommand, { type: "dro
 	return executeChecked(deps, { type: "move", cardId: card.id, to: command.column });
 }
 
+/** Asks a bot to run the card. The bot joins the assignees if it is not one yet, and the card waits in Todo. */
+async function requestRun(deps: BoardDeps, cardId: CardId, botId: string | null): Promise<CommandResult> {
+	const card = await deps.store.get(cardId);
+	if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
+	const roster = await rosterOf(deps.store);
+	const bot = botId ? roster.find((item) => item.id === botId) : roster.find((item) => card.content.assignees.includes(item.id));
+	if (!bot) throw new BoardInputError(botId ? "That bot is not on the roster." : "Assign a Grok Bot to this card first, then run it.");
+	const current = card.state.botRun;
+	if (current) {
+		const holder = roster.find((item) => item.id === current.bot)?.name ?? current.bot;
+		throw new BoardInputError(`${holder} already has a run for this card. Cancel it first.`);
+	}
+	const at = deps.now();
+	const applied = await changeState(deps, card.id, (state) =>
+		state.botRun ? null : { ...state, column: "todo", botRun: { bot: bot.id, status: "requested", requestedAt: at, startedAt: null } },
+	);
+	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
+	if (applied.kind !== "written") return { board: await viewOf(deps), notice: null, error: "busy" };
+	if (!applied.card.content.assignees.includes(bot.id)) {
+		await deps.store.patchContent(card.id, { assignees: [...applied.card.content.assignees, bot.id] });
+	}
+	await noted(deps.store, (await deps.store.get(card.id)) ?? applied.card, "You", at, `Asked ${bot.name} to run this card`);
+	return { board: await viewOf(deps), notice: `Asked ${bot.name} to run this card. It starts on the Bot's next check.`, error: null };
+}
+
+/** Withdraws a run request. A bot already working is told on its next call that the run is gone. */
+async function cancelRun(deps: BoardDeps, cardId: CardId): Promise<CommandResult> {
+	const card = await deps.store.get(cardId);
+	if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
+	if (!card.state.botRun) return { board: await viewOf(deps), notice: null, error: null };
+	const applied = await changeState(deps, card.id, (state) => (state.botRun ? { ...state, botRun: null } : null));
+	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
+	if (applied.kind === "conflict") return { board: await viewOf(deps), notice: null, error: "busy" };
+	if (applied.kind === "written") await noted(deps.store, applied.card, "You", deps.now(), "Cancelled the run");
+	return { board: await viewOf(deps), notice: "Run cancelled", error: null };
+}
+
+async function noted(store: Store, card: Card, author: string, at: Instant, text: string): Promise<BotCardView | null> {
+	const stamp = new Date(at).toISOString().slice(0, 16).replace("T", " ");
+	const line = `[${stamp} ${author}] ${text}`;
+	const notes = card.content.notes ? `${card.content.notes}\n${line}` : line;
+	const written = await store.patchContent(card.id, { notes: notes.slice(-20_000) });
+	return written ? toBotCard(written, await store.bots()) : null;
+}
+
+/** Moving a card to Done or Won't Do also drops a run it was waiting on. */
 async function move(deps: BoardDeps, cardId: CardId, to: Column): Promise<Applied> {
+	return changeState(deps, cardId, (state) => {
+		const next = moved(state, to);
+		return next && (to === "done" || to === "wontDo") ? { ...next, botRun: null } : next;
+	});
+}
+
+async function changeState(deps: BoardDeps, cardId: CardId, change: (state: CardState) => CardState | null): Promise<Applied> {
 	for (let attempt = 0; attempt < 3; attempt++) {
 		const card = await deps.store.get(cardId);
 		if (!card) return { kind: "missing" };
-		const state = moved(card.state, to);
+		const state = change(card.state);
 		if (!state) return { kind: "unchanged", card };
 		const written = await deps.store.writeState(card.id, card.version, { state, rank: card.rank });
 		if (written === "conflict") continue;

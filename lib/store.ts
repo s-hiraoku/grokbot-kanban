@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { BotProfile, BotProfilePatch } from "./bots";
-import type { Card, CardContent, CardId, CardState, Column, ContentPatch, HttpsUrl, Instant, MemberId, PastRun } from "./domain";
+import type { BotRun, Card, CardContent, CardId, CardState, Column, ContentPatch, HttpsUrl, Instant, MemberId, PastRun } from "./domain";
 import { bots, cards } from "./schema";
 
 type QueryDb = {
@@ -88,6 +88,12 @@ const pastRun = z.object({
 	outcome: z.enum(["finished", "error", "cancelled", "expired"]),
 	prUrl: z.string().nullable(),
 });
+const botRunSchema = z.object({
+	bot: z.string(),
+	status: z.enum(["requested", "working"]),
+	requestedAt: z.number(),
+	startedAt: z.number().nullable(),
+});
 // Earlier versions also stored queued, starting, running, stopping, and review states for Cursor runs.
 // Those cards read back in the column they showed in, keeping the links of a run that ended.
 const storedState = z
@@ -96,6 +102,7 @@ const storedState = z
 		column: columnSchema.optional(),
 		last: z.unknown().optional(),
 		run: z.unknown().optional(),
+		botRun: z.unknown().optional(),
 	})
 	.passthrough();
 const LEGACY_COLUMN: Record<string, Column> = {
@@ -111,7 +118,8 @@ export function readState(raw: unknown): CardState {
 	const column = stored.kind === "idle" ? stored.column : LEGACY_COLUMN[stored.kind];
 	if (!column) throw new Error(`unknown card state ${stored.kind}`);
 	const run = pastRun.safeParse(stored.kind === "review" ? stored.run : stored.last);
-	return { kind: "idle", column, last: run.success ? (run.data as PastRun) : null };
+	const botRun = botRunSchema.safeParse(stored.botRun);
+	return { kind: "idle", column, last: run.success ? (run.data as PastRun) : null, botRun: botRun.success ? (botRun.data as BotRun) : null };
 }
 
 const contentSchema = z.object({
@@ -130,7 +138,7 @@ const contentSchema = z.object({
 	assignees: z.array(z.string()),
 });
 
-const idleInbox: CardState = { kind: "idle", column: "inbox", last: null };
+const idleInbox: CardState = { kind: "idle", column: "inbox", last: null, botRun: null };
 
 export function createStore(db: QueryDb): Store {
 	return {

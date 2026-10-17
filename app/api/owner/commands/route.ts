@@ -29,6 +29,8 @@ function toCommand(raw: ReturnType<typeof ownerCommandSchema.parse>): OwnerComma
 	if (raw.type === "create") return { type: "create", content: brandContent(raw.content) };
 	if (raw.type === "edit") return { type: "edit", cardId: raw.cardId as CardId, patch: brandPatch(raw.patch) };
 	if (raw.type === "move") return { type: "move", cardId: raw.cardId as CardId, to: raw.to };
+	if (raw.type === "run") return { type: "run", cardId: raw.cardId as CardId, bot: raw.bot };
+	if (raw.type === "stop") return { type: "stop", cardId: raw.cardId as CardId };
 	if (raw.type === "drop") return { type: "drop", cardId: raw.cardId as CardId, column: raw.column, index: raw.index };
 	if (raw.type === "saveBot") return { type: "saveBot", id: raw.id, profile: raw.profile };
 	if (raw.type === "deleteBot") return { type: "deleteBot", id: raw.id };

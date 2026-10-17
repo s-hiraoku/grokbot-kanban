@@ -34,6 +34,8 @@ export type Command =
 	| { type: "create"; content: Record<string, unknown> }
 	| { type: "edit"; cardId: string; patch: Record<string, unknown> }
 	| { type: "move"; cardId: string; to: ParkColumn }
+	| { type: "run"; cardId: string; bot: string | null }
+	| { type: "stop"; cardId: string }
 	| { type: "drop"; cardId: string; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: Record<string, unknown> }
 	| { type: "deleteBot"; id: string }

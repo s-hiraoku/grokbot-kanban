@@ -62,11 +62,12 @@ test("bot API files and edits cards, and the owner sees them on refresh", async 
 	expect(cardIn(board, payload.card.id)).toMatchObject({ column: "inbox", card: { notes: "モデレーション済み", repoLabel: "s-hiraoku/grokbot" } });
 });
 
-test("the owner can no longer start or stop agents", async () => {
+test("Run needs a bot on the card, and Stop without a run does nothing", async () => {
 	const created = await createCard(botRequest("POST", "/api/bot/cards", sample));
 	const { card } = (await created.json()) as { card: { id: string } };
-	for (const type of ["run", "stop"]) {
-		const response = await command(ownerRequest(holder.current!, { type, cardId: card.id }));
-		expect(response.status).toBe(400);
-	}
+	const run = await command(ownerRequest(holder.current!, { type: "run", cardId: card.id }));
+	expect(run.status).toBe(400);
+	expect(((await run.json()) as { notice: string }).notice).toBe("Assign a Grok Bot to this card first, then run it.");
+	const stop = await command(ownerRequest(holder.current!, { type: "stop", cardId: card.id }));
+	expect(stop.status).toBe(200);
 });
