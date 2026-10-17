@@ -1,13 +1,18 @@
 import { isBot, isOwner, type Bot, type Owner } from "./auth";
 import { botIdFor, cleanBotName, colorFor, type BotProfile, type BotProfilePatch } from "./bots";
+import type { CursorClient, RunObservation } from "./cursor";
 import { DEFAULT_OWNER_AVATAR } from "./ownerAvatar";
 import {
+	CHECK_EVERY_MS,
 	COLUMNS,
+	LAUNCH_TIMEOUT_MS,
 	OWNER_MEMBER,
 	RUNNABLE,
 	runnerOf,
 	columnOf,
+	cursorPrompt,
 	moved,
+	repoKey,
 	nextRank,
 	rankBetween,
 	type Card,
@@ -17,6 +22,7 @@ import {
 	type Column,
 	type ContentPatch,
 	type Instant,
+	type LaunchId,
 	type MemberId,
 	type ParkColumn,
 } from "./domain";
@@ -33,6 +39,8 @@ export type OwnerCommand =
 	| { type: "move"; cardId: CardId; to: ParkColumn }
 	/** Ask a Grok Bot to run the card. Without a bot, the first bot assigned to the card. */
 	| { type: "run"; cardId: CardId; bot: string | null }
+	/** Hand the card to a Cursor cloud agent, which works on the card's repository and opens a PR. */
+	| { type: "cursor"; cardId: CardId }
 	| { type: "stop"; cardId: CardId }
 	| { type: "drop"; cardId: CardId; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: BotProfileInput }
@@ -96,6 +104,8 @@ export type BotBoard = {
 	runRequests(actor: string): Promise<BotCardView[]>;
 	startRun(ref: string, actor: string): Promise<BotCardView | null>;
 	finishRun(ref: string, outcome: RunOutcome, summary: string, actor: string): Promise<BotCardView | null>;
+	/** Hands the card to a Cursor agent, ending the calling bot's own run on it if it had one. */
+	handOffToCursor(ref: string, instructions: string | null, actor: string): Promise<{ card: BotCardView; message: string } | null>;
 	roster(): Promise<BotView[]>;
 	identify(actor: string): Promise<BotView>;
 	updateProfile(actor: string, patch: BotProfilePatch): Promise<BotView>;
@@ -113,6 +123,8 @@ const OUTCOME: Record<RunOutcome, { column: Column; label: string }> = {
 export type BoardDeps = {
 	store: Store;
 	now: () => Instant;
+	/** null when CURSOR_API_KEY is not set; Run then offers Grok Bots only. */
+	cursor?: CursorClient | null;
 };
 
 export type BoardHandle = {
@@ -124,7 +136,10 @@ type Applied = { kind: "written"; card: Card } | { kind: "unchanged"; card: Card
 
 export function openBoard(deps: BoardDeps): BoardHandle {
 	const ownerApi: OwnerBoard = {
-		view: () => viewOf(deps),
+		view: async () => {
+			await reconcile(deps);
+			return viewOf(deps);
+		},
 		avatar: async (botId) => (await deps.store.bot(botId))?.avatar ?? (botId === OWNER_MEMBER ? DEFAULT_OWNER_AVATAR : null),
 		execute: (command) => execute(deps, command),
 	};
@@ -174,15 +189,18 @@ function botApi(deps: BoardDeps): BotBoard {
 			return updateCard(card, next);
 		},
 		async get(id) {
+			await reconcile(deps);
 			const card = await store.get(id);
 			return card ? toBotCard(card, await store.bots()) : null;
 		},
 		async find(ref) {
+			await reconcile(deps);
 			const card = await findCard(store, ref);
 			return card ? toBotCard(card, await store.bots()) : null;
 		},
 		async list(filter, actor) {
 			const bot = await identify(actor);
+			await reconcile(deps);
 			const roster = await store.bots();
 			let cards = await store.all();
 			if (filter.column) cards = cards.filter((card) => columnOf(card.state) === filter.column);
@@ -264,12 +282,23 @@ function botApi(deps: BoardDeps): BotBoard {
 			const bot = await touchBot(store, actor, now());
 			const card = await findCard(store, ref);
 			if (!card) return null;
-			if (card.state.botRun?.bot !== bot.id) throw new BoardInputError(`This card has no run for ${bot.name}. It may have been cancelled by the owner.`);
+			if (card.state.botRun?.bot !== bot.id) {
+				if (card.state.cursorRun?.by === bot.id) throw new BoardInputError("You handed this card to Cursor, so your run is over. The board finishes the card when Cursor does.");
+				throw new BoardInputError(`This card has no run for ${bot.name}. It may have been cancelled by the owner.`);
+			}
 			const { column, label } = OUTCOME[outcome];
 			const applied = await changeState(deps, card.id, (state) => (state.botRun?.bot === bot.id ? { ...state, column, botRun: null } : null));
 			if (applied.kind === "conflict") throw new BoardInputError("The board is busy. Try again.");
 			if (applied.kind === "missing") return null;
 			return noted(store, applied.card, bot.name, now(), `Run ${label}: ${summary.trim()}`);
+		},
+		async handOffToCursor(ref, instructions, actor) {
+			const bot = await touchBot(store, actor, now());
+			const card = await findCard(store, ref);
+			if (!card) return null;
+			const result = await launchCursor(deps, card.id, { by: bot.id, byName: bot.name, instructions });
+			if (!result) return null;
+			return { card: toBotCard(result.card, await store.bots()), message: result.notice };
 		},
 		async roster() {
 			const cards = await store.all();
@@ -287,6 +316,7 @@ function botApi(deps: BoardDeps): BotBoard {
 		},
 		async summary(actor) {
 			const bot = await identify(actor);
+			await reconcile(deps);
 			const cards = await store.all();
 			const roster = await store.bots();
 			const view = toBoardView(cards, roster, now());
@@ -422,6 +452,11 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 	}
 	if (command.type === "drop") return drop(deps, command);
 	if (command.type === "run") return requestRun(deps, command.cardId, command.bot);
+	if (command.type === "cursor") {
+		const result = await launchCursor(deps, command.cardId, { by: OWNER_MEMBER, byName: "You", instructions: null });
+		if (!result) return { board: await viewOf(deps), notice: null, error: "not_found" };
+		return { board: await viewOf(deps), notice: result.notice, error: null };
+	}
 	if (command.type === "stop") return cancelRun(deps, command.cardId);
 	if (command.type === "create") {
 		const ranks = (await deps.store.all()).map((card) => card.rank);
@@ -494,6 +529,7 @@ async function requestRun(deps: BoardDeps, cardId: CardId, botId: string | null)
 	const roster = await rosterOf(deps.store);
 	const bot = botId ? roster.find((item) => item.id === botId) : runnerOf(card.content.assignees, roster);
 	if (!bot) throw new BoardInputError(botId ? "That bot is not on the roster." : "Assign a Grok Bot to this card first, then run it.");
+	if (card.state.cursorRun) throw new BoardInputError("A Cursor agent is on this card. Cancel it first.");
 	const current = card.state.botRun;
 	if (!current && !RUNNABLE.includes(card.state.column)) throw new BoardInputError("Run works on cards in Inbox, Todo, or In Progress. Move the card back to Todo to run it again.");
 	if (current) {
@@ -502,7 +538,7 @@ async function requestRun(deps: BoardDeps, cardId: CardId, botId: string | null)
 	}
 	const at = deps.now();
 	const applied = await changeState(deps, card.id, (state) =>
-		state.botRun ? null : { ...state, column: "inProgress", botRun: { bot: bot.id, status: "requested", requestedAt: at, startedAt: null } },
+		state.botRun || state.cursorRun ? null : { ...state, column: "inProgress", botRun: { bot: bot.id, status: "requested", requestedAt: at, startedAt: null } },
 	);
 	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
 	if (applied.kind !== "written") return { board: await viewOf(deps), notice: null, error: "busy" };
@@ -517,6 +553,7 @@ async function requestRun(deps: BoardDeps, cardId: CardId, botId: string | null)
 async function cancelRun(deps: BoardDeps, cardId: CardId): Promise<CommandResult> {
 	const card = await deps.store.get(cardId);
 	if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
+	if (card.state.cursorRun) return cancelCursor(deps, card);
 	if (!card.state.botRun) return { board: await viewOf(deps), notice: null, error: null };
 	// A request no Bot has picked up goes back to Todo; work already under way stays where it is.
 	const applied = await changeState(deps, card.id, (state) =>
@@ -534,6 +571,156 @@ async function noted(store: Store, card: Card, author: string, at: Instant, text
 	const notes = card.content.notes ? `${card.content.notes}\n${line}` : line;
 	const written = await store.patchContent(card.id, { notes: notes.slice(-20_000) });
 	return written ? toBotCard(written, await store.bots()) : null;
+}
+
+/**
+ * Hands a card to a Cursor cloud agent. The card claims the launch first, so a double press or two Bots
+ * at once start one agent, then waits in In Progress. null when the card is gone.
+ */
+async function launchCursor(
+	deps: BoardDeps,
+	cardId: CardId,
+	handoff: { by: MemberId; byName: string; instructions: string | null },
+): Promise<{ card: Card; notice: string } | null> {
+	const cursor = deps.cursor;
+	if (!cursor) throw new BoardInputError("Cursor is not connected. Add CURSOR_API_KEY to the deployment's environment variables and redeploy.");
+	const card = await deps.store.get(cardId);
+	if (!card) return null;
+	const repo = card.content.repo;
+	if (!repo) throw new BoardInputError("Add the card's repository first (More fields, Repo), so Cursor knows where to work.");
+	if (card.state.cursorRun) throw new BoardInputError("A Cursor agent is already on this card.");
+	const held = card.state.botRun;
+	if (held && held.bot !== handoff.by) {
+		const holder = (await deps.store.bot(held.bot))?.name ?? held.bot;
+		throw new BoardInputError(`${holder} has a run on this card. Cancel it first.`);
+	}
+	if (!held && !RUNNABLE.includes(card.state.column)) throw new BoardInputError("Run works on cards in Inbox, Todo, or In Progress. Move the card back to Todo to run it again.");
+
+	const at = deps.now();
+	const launchId = crypto.randomUUID() as LaunchId;
+	const ours = (state: CardState) => state.cursorRun?.launchId === launchId;
+	const claimed = await changeState(deps, card.id, (state) =>
+		state.cursorRun || (state.botRun && state.botRun.bot !== handoff.by)
+			? null
+			: { ...state, column: "inProgress", cursorRun: { launchId, status: "launching", agent: null, by: handoff.by, from: state.column, startedAt: at, checkedAt: at } },
+	);
+	if (claimed.kind === "missing") return null;
+	if (claimed.kind !== "written") throw new BoardInputError("Someone else started a run on this card at the same moment.");
+
+	const result = await cursor.createAgent({
+		promptText: cursorPrompt(card.content, { by: handoff.byName, instructions: handoff.instructions }),
+		repo,
+		name: card.content.title,
+	});
+	if (result.kind === "rejected") {
+		// Back where it was, with any Bot run it had, and the reason on the card.
+		const applied = await changeState(deps, card.id, (state) => (ours(state) ? { ...state, column: state.cursorRun!.from, cursorRun: null } : null));
+		if (applied.kind === "written") await noted(deps.store, applied.card, handoff.byName, at, `Cursor refused the hand-off: ${result.message}`);
+		throw new BoardInputError(result.message);
+	}
+	if (result.kind === "unknown") {
+		const fresh = (await deps.store.get(card.id)) ?? claimed.card;
+		await noted(deps.store, fresh, handoff.byName, at, `Handed to Cursor, but Cursor did not confirm (${result.message})`);
+		return {
+			card: (await deps.store.get(card.id)) ?? fresh,
+			notice: "Cursor did not confirm the launch. The card waits 2 minutes for it; if it does not show up, check Cursor before running again.",
+		};
+	}
+	// The hand-off ends the Bot's own run, if it had one.
+	const applied = await changeState(deps, card.id, (state) =>
+		ours(state) ? { ...state, botRun: null, cursorRun: { ...state.cursorRun!, status: "running", agent: result.agent, checkedAt: deps.now() } } : null,
+	);
+	const fresh = applied.kind === "written" ? applied.card : ((await deps.store.get(card.id)) ?? claimed.card);
+	await noted(deps.store, fresh, handoff.byName, at, `Handed to a Cursor agent: ${result.agent.url}`);
+	return { card: (await deps.store.get(card.id)) ?? fresh, notice: "Cursor is on it. The card moves to In Review when the pull request is ready." };
+}
+
+/** Asks Cursor how each card's run is going, at most every CHECK_EVERY_MS per card, and lands the ones that ended. */
+async function reconcile(deps: BoardDeps): Promise<void> {
+	const at = deps.now();
+	const running = (await deps.store.all()).filter((card) => card.state.cursorRun);
+	await Promise.all(running.map((card) => checkRun(deps, card, at)));
+}
+
+async function checkRun(deps: BoardDeps, card: Card, at: Instant): Promise<void> {
+	const run = card.state.cursorRun;
+	if (!run) return;
+	const ours = (state: CardState) => state.cursorRun?.launchId === run.launchId;
+	if (!run.agent) {
+		if (at - run.startedAt < LAUNCH_TIMEOUT_MS) return;
+		const applied = await changeState(deps, card.id, (state) =>
+			ours(state) && !state.cursorRun!.agent ? { ...state, column: state.column === "inProgress" ? run.from : state.column, cursorRun: null } : null,
+		);
+		if (applied.kind === "written") {
+			await noted(deps.store, applied.card, "Cursor", at, "The launch never confirmed. Check Cursor before running again: an agent may have started.");
+		}
+		return;
+	}
+	if (!deps.cursor || at - run.checkedAt < CHECK_EVERY_MS) return;
+	const seen = await deps.cursor.getRun(run.agent);
+	if (seen === "unreachable" || seen.phase === "active") {
+		await changeState(deps, card.id, (state) => (ours(state) ? { ...state, cursorRun: { ...state.cursorRun!, checkedAt: at } } : null));
+		return;
+	}
+	await endRun(deps, card, seen, at);
+}
+
+const ENDING: Record<Extract<RunObservation, { phase: "ended" }>["outcome"], { column: Column; text: (agent: string, pr: string | null) => string }> = {
+	finished: { column: "inReview", text: (agent, pr) => (pr ? `Finished. Pull request: ${pr}` : `Finished without a pull request. See ${agent}`) },
+	error: { column: "todo", text: (agent) => `The run failed. See ${agent}` },
+	cancelled: { column: "todo", text: () => "The run was cancelled." },
+	expired: { column: "todo", text: (agent) => `The run expired before it finished. See ${agent}` },
+};
+
+/**
+ * Lands a run that ended: a finished one goes to In Review with its pull request, anything else back to
+ * Todo. A card someone moved by hand while Cursor worked stays where they put it.
+ */
+async function endRun(deps: BoardDeps, card: Card, seen: Extract<RunObservation, { phase: "ended" }>, at: Instant): Promise<Card | null> {
+	const run = card.state.cursorRun;
+	if (!run?.agent) return null;
+	const agent = run.agent;
+	const wanted = card.content.repo ? repoKey(card.content.repo.url) : null;
+	const prUrl = seen.pullRequests.find((item) => item.repoKey === wanted)?.url ?? seen.pullRequests[0]?.url ?? null;
+	const ending = ENDING[seen.outcome];
+	const applied = await changeState(deps, card.id, (state) =>
+		state.cursorRun?.launchId === run.launchId
+			? {
+					...state,
+					column: state.column === "inProgress" ? ending.column : state.column,
+					cursorRun: null,
+					last: { kind: "ended", launchId: run.launchId, endedAt: at, agent, outcome: seen.outcome, prUrl },
+				}
+			: null,
+	);
+	if (applied.kind !== "written") return null;
+	await noted(deps.store, applied.card, "Cursor", at, ending.text(agent.url, prUrl));
+	return applied.card;
+}
+
+/** Stops the Cursor agent on a card. One that already ended is landed as it ended. */
+async function cancelCursor(deps: BoardDeps, card: Card): Promise<CommandResult> {
+	const run = card.state.cursorRun!;
+	const at = deps.now();
+	if (!run.agent) {
+		const applied = await changeState(deps, card.id, (state) =>
+			state.cursorRun?.launchId === run.launchId ? { ...state, column: state.column === "inProgress" ? run.from : state.column, cursorRun: null } : null,
+		);
+		if (applied.kind === "written") await noted(deps.store, applied.card, "You", at, "Cancelled the Cursor launch before Cursor confirmed it. Check Cursor in case an agent started.");
+		return { board: await viewOf(deps), notice: "Run cancelled", error: null };
+	}
+	const cursor = deps.cursor;
+	if (!cursor) throw new BoardInputError("Cursor is not connected, so the board cannot stop the agent. Stop it in Cursor.");
+	const answer = await cursor.cancelRun(run.agent);
+	if (answer === "unreachable") throw new BoardInputError("Could not reach Cursor to stop the agent. Try again.");
+	if (answer === "notCancellable") {
+		const seen = await cursor.getRun(run.agent);
+		if (seen !== "unreachable" && seen.phase === "ended") await endRun(deps, card, seen, at);
+		return { board: await viewOf(deps), notice: "The Cursor run had already ended.", error: null };
+	}
+	const ended = await endRun(deps, card, { phase: "ended", outcome: "cancelled", pullRequests: [] }, at);
+	if (ended) await noted(deps.store, ended, "You", at, "Cancelled the Cursor run");
+	return { board: await viewOf(deps), notice: "Run cancelled", error: null };
 }
 
 /** Moving a card to Done or Won't Do also drops a run it was waiting on. */
@@ -560,7 +747,7 @@ async function changeState(deps: BoardDeps, cardId: CardId, change: (state: Card
 }
 
 async function viewOf(deps: BoardDeps): Promise<BoardView> {
-	return toBoardView(await deps.store.all(), await deps.store.bots(), deps.now());
+	return toBoardView(await deps.store.all(), await deps.store.bots(), deps.now(), { cursorEnabled: Boolean(deps.cursor) });
 }
 
 function labelOf(column: Column): string {

@@ -48,10 +48,7 @@ export type ContentPatch = {
 
 export type AgentRef = { agentId: AgentId; runId: RunId; url: HttpsUrl };
 
-/**
- * A Cursor agent run that ended before the board stopped launching agents. Old cards keep it so their
- * agent and pull request links still open.
- */
+/** The card's last Cursor agent run that ended, so its agent and pull request links still open. */
 export type PastRun = {
 	kind: "ended";
 	launchId: LaunchId;
@@ -91,10 +88,49 @@ export type BotRun = {
 };
 
 /**
- * Where a card sits, and the Bot run it is waiting on, if any. The stored shape is still the idle state
- * earlier versions wrote; they ignore the extra botRun field.
+ * A Cursor cloud agent working on the card's repository. launching until Cursor confirms the agent, then
+ * running until the board sees the run end. The owner starts one from Run, or a Bot hands the card over.
  */
-export type CardState = { kind: "idle"; column: Column; last: PastRun | null; botRun: BotRun | null };
+export type CursorRun = {
+	launchId: LaunchId;
+	status: "launching" | "running";
+	agent: AgentRef | null;
+	/** Who handed the card to Cursor: the owner or a Bot. */
+	by: MemberId;
+	/** The column the card left, where it goes back if Cursor refuses the launch. */
+	from: Column;
+	startedAt: Instant;
+	/** When the board last asked Cursor how the run is going. */
+	checkedAt: Instant;
+};
+
+/** How long a launch may stay unconfirmed before the board gives up on it. */
+export const LAUNCH_TIMEOUT_MS = 2 * 60_000;
+/** How often the board asks Cursor about a run while someone is looking. */
+export const CHECK_EVERY_MS = 20_000;
+export const CREATE_TIMEOUT_MS = 15_000;
+export const CHECK_TIMEOUT_MS = 8_000;
+
+/**
+ * Where a card sits, and the run it is waiting on, if any: a Grok Bot's or a Cursor agent's, never both.
+ * The stored shape is still the idle state earlier versions wrote; they ignore the extra run fields.
+ */
+export type CardState = { kind: "idle"; column: Column; last: PastRun | null; botRun: BotRun | null; cursorRun: CursorRun | null };
+
+/** What a Cursor agent is told: the card itself, its notes so far, and what the hand-off adds. */
+export function cursorPrompt(content: CardContent, handoff: { by: string; instructions: string | null }): string {
+	const parts = [`# ${content.title}`];
+	if (content.body.trim()) parts.push(content.body.trim());
+	if (content.notes.trim()) parts.push(`## Notes on the card so far\n${content.notes.trim().slice(-6000)}`);
+	if (handoff.instructions?.trim()) parts.push(`## From ${handoff.by}\n${handoff.instructions.trim()}`);
+	parts.push("Make the change this card asks for in the repository, and open a pull request with it. If the card does not ask for a code change, explain why in the pull request description instead.");
+	return parts.join("\n\n");
+}
+
+/** A repository URL without its scheme or .git, as Cursor reports it in git.branches[].repoUrl. */
+export function repoKey(url: string): string {
+	return url.replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
+}
 
 export type Card = {
 	id: CardId;
@@ -140,7 +176,7 @@ export function nextRank(ranks: readonly string[]): string {
 }
 
 export function agentHref(state: CardState): string | null {
-	return state.last?.agent.url ?? null;
+	return state.cursorRun?.agent?.url ?? state.last?.agent.url ?? null;
 }
 
 export function prHref(state: CardState): string | null {

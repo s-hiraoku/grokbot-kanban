@@ -56,6 +56,7 @@ export default function BotsPanel({
 - 依頼があれば古い順に 1 件ずつ: start_run を呼ぶ → get_card で内容を読む → 書かれている作業をする → 途中経過は add_note に残す → finish_run を呼ぶ（完了は done、オーナーの確認が要るなら review、進められないなら blocked）。summary には、やったこと・結果のリンク・残っていることを書く
 - 承認が要る操作は、いつも通り私に確認してから進める
 - finish_run が「run がない」と返したら、オーナーが取り消したので作業を止めて add_note に状況を残す
+- カードの作業にリポジトリのコード変更が必要なら、自分で finish_run せずに hand_off_to_cursor で Cursor エージェントに渡す。カードに repo がなければ先に update_card で設定し、instructions には調べたこと・関係するファイル・確認方法を書く
 作ったら、テスト実行をせずに Routine の内容を短く報告してください。`;
 	const iconMessage = `あなたのプロフィール画像を kanban に登録してください。
 1. 下に添付した画像（あなたの Edit Profile のアイコンと同じもの）をファイルに保存する

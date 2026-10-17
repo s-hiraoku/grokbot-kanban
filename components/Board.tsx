@@ -42,6 +42,7 @@ export type Command =
 	| { type: "edit"; cardId: string; patch: Record<string, unknown> }
 	| { type: "move"; cardId: string; to: ParkColumn }
 	| { type: "run"; cardId: string; bot: string | null }
+	| { type: "cursor"; cardId: string }
 	| { type: "stop"; cardId: string }
 	| { type: "drop"; cardId: string; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: Record<string, unknown> }
@@ -283,9 +284,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		},
 		onEdit: () => openDrawer({ mode: "edit", cardId: card.id, dialog: true }),
 		onDelete: () => askDelete(card),
-		onRun: (botId) => send({ type: "run", cardId: card.id, bot: botId }),
-		onStopRun: () => send({ type: "stop", cardId: card.id }),
+		send,
 		bots: board.bots,
+		cursorEnabled: board.cursor.enabled,
 	});
 
 	function askDelete(card: CardView) {
@@ -439,7 +440,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 					activeCard && "select-none",
 				)}
 			>
-				<header className="sticky top-0 z-10 flex flex-wrap items-center gap-2.5 border-b bg-deck-2 px-4 py-2.5 [grid-area:top] md:static md:flex-nowrap md:gap-3.5 md:px-[18px] md:py-3">
+				<header className="sticky top-0 z-10 flex flex-wrap items-center gap-2.5 border-b bg-deck-2 px-4 py-2.5 [grid-area:top] md:static md:flex-nowrap md:gap-3.5 md:px-5 md:py-3">
 					<div className="flex flex-none items-center gap-1.5 md:w-[86px]">
 						{studioUrl ? (
 							<a className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" href={studioUrl} aria-label="Back to the studio">
@@ -464,9 +465,23 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 								}
 							}}
 							lang="ja"
-							className="bg-background pr-9 pl-8 dark:bg-background"
+							className="bg-background pr-9 pl-8 dark:bg-background [&::-webkit-search-cancel-button]:hidden"
 						/>
-						<Kbd className="absolute right-2 max-md:hidden">/</Kbd>
+						{query ? (
+							<button
+								type="button"
+								className="absolute right-1.5 grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+								aria-label="Clear search"
+								onClick={() => {
+									setQuery("");
+									document.getElementById("board-search")?.focus();
+								}}
+							>
+								<XIcon className="size-3.5" />
+							</button>
+						) : (
+							<Kbd className="absolute right-2 max-md:hidden">/</Kbd>
+						)}
 					</label>
 					<Button className="ml-auto" onClick={() => openDrawer({ mode: "create" })} title="Shortcut: n">
 						<PlusIcon />
@@ -519,22 +534,37 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 
 				<main className="flex min-h-0 flex-col [grid-area:lanes]">
 					{filtering ? (
-						<p className="mx-4 mt-2.5 flex items-center gap-3 text-[13px] text-muted-foreground md:mx-[18px]" role="status">
-							Showing {shown} of {cards.size} {cards.size === 1 ? "card" : "cards"}
-							<Button
-								variant="link"
-								size="xs"
-								className="h-auto px-0"
-								onClick={() => {
-									setQuery("");
-									setMemberFilter(null);
-								}}
-							>
-								Clear filters
-							</Button>
-						</p>
+						// What the board is filtered by, each with its own ×, and Clear all beside them, aligned with the columns.
+						<div className="flex flex-wrap items-center gap-2 px-4 pt-3 md:px-5 md:pt-4" role="status" aria-label="Filters">
+							<span className="mr-1 text-[13px] text-muted-foreground">
+								<strong className="font-bold text-foreground">{shown}</strong> of {cards.size} {cards.size === 1 ? "card" : "cards"}
+							</span>
+							{needle ? (
+								<FilterChip label="Search" value={query.trim()} onClear={() => setQuery("")} />
+							) : null}
+							{memberFilter ? (
+								<FilterChip
+									label={memberFilter === "none" ? "Assignee" : "Member"}
+									value={memberFilter === "none" ? "Unassigned" : memberFilter === OWNER.id ? "You" : (board.bots.find((bot) => bot.id === memberFilter)?.name ?? memberFilter)}
+									onClear={() => setMemberFilter(null)}
+								/>
+							) : null}
+							{needle && memberFilter ? (
+								<Button
+									variant="ghost"
+									size="xs"
+									className="text-muted-foreground hover:text-foreground"
+									onClick={() => {
+										setQuery("");
+										setMemberFilter(null);
+									}}
+								>
+									Clear all
+								</Button>
+							) : null}
+						</div>
 					) : null}
-					<div className="flex min-h-0 flex-1 snap-x snap-mandatory items-stretch gap-2.5 overflow-x-auto px-4 pt-3 pb-6 md:snap-none md:gap-3 md:px-[18px] md:pt-3.5 md:pb-[18px]">
+					<div className={cn("flex min-h-0 flex-1 snap-x snap-mandatory scroll-px-4 items-stretch gap-3 overflow-x-auto px-4 pt-3 pb-5 md:snap-none md:gap-3.5 md:p-5", filtering && "md:pt-3")}>
 						{board.columns.map((column) => {
 							const ids = (order[column.id] ?? []).filter((id) => cards.has(id) && visible(cards.get(id)!));
 							const isFolded = folded.includes(column.id);
@@ -543,7 +573,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 									key={column.id}
 									id={column.id}
 									label={column.label}
-									count={(order[column.id] ?? []).length}
+									count={filtering ? ids.length : (order[column.id] ?? []).length}
 									canDrop={Boolean(activeCard)}
 									folded={isFolded}
 									onFold={FOLDABLE.includes(column.id) ? () => toggleFold(column.id) : null}
@@ -579,6 +609,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						open={drawerOpen}
 						card={editing}
 						dialog={dialog}
+						cursorEnabled={board.cursor.enabled}
 						members={members}
 						onClose={closeDrawer}
 						onDelete={askDelete}
@@ -701,14 +732,14 @@ function ColumnShell({
 			data-column={id}
 			aria-label={label}
 			className={cn(
-				"flex min-h-0 flex-col rounded-[14px] border bg-deck transition-colors [--surface:var(--deck)]",
-				"max-h-[calc(100dvh-220px)] flex-[0_0_calc(100vw-48px)] snap-center md:max-h-none md:max-w-[340px] md:min-w-[232px] md:flex-[1_1_232px]",
+				"flex min-h-0 flex-col rounded-2xl border bg-deck-2 transition-colors [--surface:var(--deck-2)]",
+				"max-h-[calc(100dvh-220px)] flex-[0_0_calc(100vw-48px)] snap-start md:max-h-none md:max-w-[360px] md:min-w-[232px] md:flex-[1_1_232px]",
 				folded && "max-w-[52px] min-w-[52px] flex-[0_0_52px] md:max-w-[52px] md:min-w-[52px] md:flex-[0_0_52px]",
 				canDrop && "border-line",
 				canDrop && isOver && "border-primary bg-[#1f2848]",
 			)}
 		>
-			<header className={cn("flex items-center gap-2 py-2 pr-3 pl-3.5 pt-3 select-none", folded && "flex-col gap-2.5 px-0 py-3")}>
+			<header className={cn("flex h-12 flex-none items-center gap-2 pr-2 pl-4 select-none", folded && "h-auto flex-col gap-2.5 px-0 py-3")}>
 				{onFold && folded ? <FoldButton label={label} folded onClick={onFold} /> : null}
 				<span aria-hidden="true" className={cn("size-2 flex-none rounded-full bg-(--lamp)", id === "inProgress" && "shadow-[0_0_8px_var(--lamp)]")} />
 				<h2 className={cn("font-display text-[15px] font-semibold tracking-[0.01em] whitespace-nowrap", folded && "text-sm [writing-mode:vertical-rl]")}>{label}</h2>
@@ -729,8 +760,23 @@ function ColumnShell({
 					</span>
 				) : null}
 			</header>
-			<div className={cn("flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto px-2.5 pt-0.5 pb-3", folded && "min-h-0 p-0")}>{children}</div>
+			<div className={cn("flex min-h-[60px] flex-1 flex-col gap-2.5 overflow-y-auto px-2.5 pt-0.5 pb-2.5", folded && "min-h-0 p-0")}>{children}</div>
 		</section>
+	);
+}
+
+/** One active filter, such as Search "ログ", with an × that removes just that filter. */
+function FilterChip({ label, value, onClear }: { label: string; value: string; onClear: () => void }) {
+	return (
+		<span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-line bg-secondary pr-1 pl-3 text-[13px]">
+			<span className="text-muted-foreground">{label}</span>
+			<span className="max-w-[16rem] truncate font-bold" lang="ja">
+				{value}
+			</span>
+			<button type="button" className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-line hover:text-foreground" aria-label={`Remove the ${label.toLowerCase()} filter`} onClick={onClear}>
+				<XIcon className="size-3" />
+			</button>
+		</span>
 	);
 }
 

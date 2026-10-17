@@ -6,7 +6,7 @@ test("Run on a card with a Bot assignee starts the run at once, with no menu", a
 	await tool(request, "create_card", { bot: "Ops", title, assignees: ["Ops"] });
 	await signIn(page);
 
-	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
+	await cardTitled(page, title).getByRole("button", { name: "Run", exact: true }).click();
 	await expect(openMenu(page)).toHaveCount(0);
 	await expect(runStatus(page, title)).toHaveText("Run requested");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Progress/);
@@ -22,7 +22,7 @@ test("Run on a card with no Bot assignee asks which Bot, drawn above the cards b
 	for (let index = 0; index < 3; index += 1) await tool(request, "create_card", { bot: "Scout", title: `below ${unique()}` });
 	await signIn(page);
 
-	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
+	await cardTitled(page, title).getByRole("button", { name: /Run with a Grok Bot/ }).click();
 	await expectFullyVisible(openMenu(page));
 	await page.getByRole("menuitem", { name: "Scout" }).click();
 	await expect(runStatus(page, title)).toHaveText("Run requested");
@@ -38,9 +38,9 @@ test("menus on a card at the bottom of the screen open where every item can be p
 	const card = cardTitled(page, title);
 	await card.scrollIntoViewIfNeeded();
 
-	await card.getByRole("button", { name: "Run" }).click();
+	await card.getByRole("button", { name: /Run with a Grok Bot/ }).click();
 	await expectFullyVisible(openMenu(page));
-	await page.getByRole("menuitem").last().hover();
+	await openMenu(page).locator("[role=menuitem]:not([data-disabled])").last().hover();
 	await page.keyboard.press("Escape");
 
 	await card.getByRole("button", { name: "Card actions" }).click();
@@ -53,10 +53,10 @@ test("a running card's badge cancels the run", async ({ page, request }) => {
 	const title = `cancel ${unique()}`;
 	await tool(request, "create_card", { bot: "Ops", title, assignees: ["Ops"] });
 	await signIn(page);
-	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
+	await cardTitled(page, title).getByRole("button", { name: "Run", exact: true }).click();
 	await cardTitled(page, title).getByRole("button", { name: /Waiting for Ops/ }).click();
 	await expectFullyVisible(openMenu(page));
 	await page.getByRole("menuitem", { name: "Cancel run" }).click();
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", "Todo");
-	await expect(cardTitled(page, title).getByRole("button", { name: "Run" })).toBeVisible();
+	await expect(cardTitled(page, title).getByRole("button", { name: "Run", exact: true })).toBeVisible();
 });

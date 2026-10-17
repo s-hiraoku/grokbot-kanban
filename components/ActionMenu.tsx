@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, ReactElement, ReactNode } from "react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 /**
@@ -46,6 +46,10 @@ export function MenuItem({ danger, current, className, ...props }: ComponentProp
 
 export function MenuTitle({ children }: { children: ReactNode }) {
 	return <DropdownMenuLabel className="pt-1 pb-1 text-[11px] font-bold tracking-wider text-faint uppercase">{children}</DropdownMenuLabel>;
+}
+
+export function MenuSeparator() {
+	return <DropdownMenuSeparator />;
 }
 
 export function MenuNote({ children }: { children: ReactNode }) {

@@ -15,7 +15,7 @@
 
 	--background: #141a2e;
 	--foreground: #e6e9f5;
-	--card: #232c4d;
+	--card: #252f55;
 	--card-foreground: #e6e9f5;
 	--popover: #161c36;
 	--popover-foreground: #e6e9f5;
@@ -55,9 +55,10 @@
 }
 
 @theme inline {
-	--font-sans: "BIZ UDPGothic", ui-sans-serif, system-ui, sans-serif;
-	--font-display: "Chakra Petch", "BIZ UDPGothic", ui-sans-serif, sans-serif;
-	--font-mono: ui-monospace, "BIZ UDPGothic", monospace;
+	/* Noto Sans JP, then the Japanese system fonts of each platform, so text never falls back to Chinese glyphs. */
+	--font-sans: var(--font-noto-sans-jp), "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+	--font-display: var(--font-chakra-petch), var(--font-noto-sans-jp), "Hiragino Sans", "Yu Gothic UI", sans-serif;
+	--font-mono: ui-monospace, "SFMono-Regular", Menlo, var(--font-noto-sans-jp), monospace;
 
 	--radius-sm: calc(var(--radius) - 4px);
 	--radius-md: calc(var(--radius) - 2px);
@@ -119,7 +120,18 @@
 		@apply min-h-full bg-background text-foreground;
 	}
 	body {
-		@apply font-sans text-sm antialiased;
+		@apply font-sans text-sm leading-normal antialiased;
+		/* Japanese reads better slightly open, with kana and Latin kept apart. */
+		letter-spacing: 0.01em;
+		line-break: strict;
+	}
+	/* Headings set kana proportionally, which tightens titles without crowding the kanji. */
+	h1,
+	h2,
+	h3,
+	h4 {
+		font-feature-settings: "palt";
+		letter-spacing: 0.02em;
 	}
 	a {
 		@apply text-primary underline-offset-3;
@@ -142,7 +154,7 @@
 
 /* Reading copy for card details: paragraphs, "#" headings, "-" lists, and links. */
 @utility prose-card {
-	@apply text-[15px] leading-[1.85] break-words;
+	@apply text-[15px] leading-[1.9] break-words;
 	& > :first-child {
 		@apply mt-0;
 	}

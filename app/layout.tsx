@@ -1,6 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { Chakra_Petch, Noto_Sans_JP } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
+
+// Body text is mostly Japanese, so the board reads in Noto Sans JP. next/font serves it from the app itself,
+// split by character range, so a page only downloads the glyphs it shows.
+const sans = Noto_Sans_JP({ weight: ["400", "500", "700"], display: "swap", preload: false, variable: "--font-noto-sans-jp" });
+// Short English labels: the wordmark, column names, counts.
+const display = Chakra_Petch({ weight: ["500", "600", "700"], subsets: ["latin"], display: "swap", variable: "--font-chakra-petch" });
 
 export const metadata: Metadata = {
 	title: "Grok Bot Kanban",
@@ -14,15 +21,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
 	return (
-		<html lang="en" className="dark">
-			<head>
-				<link rel="preconnect" href="https://fonts.googleapis.com" />
-				<link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-				<link
-					href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Chakra+Petch:wght@500;600;700&display=swap"
-					rel="stylesheet"
-				/>
-			</head>
+		<html lang="ja" className={`dark ${sans.variable} ${display.variable}`}>
 			<body>
 				<TooltipProvider delayDuration={400}>{children}</TooltipProvider>
 			</body>
