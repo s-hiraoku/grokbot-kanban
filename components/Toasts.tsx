@@ -1,41 +1,32 @@
 "use client";
 
-import { useEffect } from "react";
-import { TOAST_MS, type ToastMessage } from "@/lib/notify";
+import { toast } from "sonner";
+import { Toaster } from "@/components/ui/sonner";
+import { TOAST_LIMIT, TOAST_MS, type ToastMessage } from "@/lib/notify";
 
-export type ShownToast = ToastMessage & { id: number };
-
-const ICON: Record<ShownToast["tone"], string> = { success: "✓", info: "i", warning: "!", error: "×" };
-const LABEL: Record<ShownToast["tone"], string> = { success: "Done", info: "Note", warning: "Warning", error: "Error" };
-
-export default function Toasts({ toasts, onDismiss }: { toasts: readonly ShownToast[]; onDismiss: (id: number) => void }) {
-	return (
-		<div className="toasts" aria-live="polite">
-			{toasts.map((toast) => (
-				<ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
-			))}
-		</div>
-	);
+/** Shows a toast. The same text again replaces the one showing instead of stacking a copy. */
+export function showToast(message: ToastMessage) {
+	toast[message.tone](message.text, { id: message.text, duration: TOAST_MS[message.tone] });
 }
 
-function ToastItem({ toast, onDismiss }: { toast: ShownToast; onDismiss: (id: number) => void }) {
-	useEffect(() => {
-		const timer = window.setTimeout(() => onDismiss(toast.id), TOAST_MS[toast.tone]);
-		return () => window.clearTimeout(timer);
-	}, [toast.id, toast.tone, onDismiss]);
-	const urgent = toast.tone === "error" || toast.tone === "warning";
+/** Errors red, warnings amber, everything else in the deck's own colors; each can be closed with ×. */
+export default function Toasts() {
 	return (
-		<div className={`toast ${toast.tone}`} role={urgent ? "alert" : "status"}>
-			<span className="toast-icon" aria-hidden="true">
-				{ICON[toast.tone]}
-			</span>
-			<span className="visually-hidden">{LABEL[toast.tone]}: </span>
-			<span className="toast-text" lang="ja">
-				{toast.text}
-			</span>
-			<button type="button" className="toast-close" aria-label="Dismiss" onClick={() => onDismiss(toast.id)}>
-				×
-			</button>
-		</div>
+		<Toaster
+			position="bottom-center"
+			visibleToasts={TOAST_LIMIT}
+			closeButton
+			toastOptions={{
+				classNames: {
+					toast: "!items-start !border-l-4 !font-sans !text-[13px] !leading-snug",
+					title: "break-words",
+					success: "!border-l-teal [&_[data-icon]]:!text-teal",
+					info: "!border-l-muted-foreground",
+					warning: "!border-[#7a5d1f] !border-l-primary !bg-amber-soft !text-[#ffe7b3] [&_[data-icon]]:!text-primary",
+					error: "!border-[#6e3340] !border-l-destructive !bg-danger-soft !text-[#ffd8d1] [&_[data-icon]]:!text-destructive",
+					closeButton: "!left-auto !right-0 !top-0 !translate-x-1/3 !-translate-y-1/3 !border-line !bg-popover !text-foreground",
+				},
+			}}
+		/>
 	);
 }

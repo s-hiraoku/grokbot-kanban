@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-// Browser tests for the board. They start their own dev server on an in-memory PGlite database.
+// Browser tests for the board. They build the app and serve it on an in-memory PGlite database, so they
+// exercise what ships, without the dev server's reloads. Stop `next dev` first, as both use .next.
 const PORT = 3210;
 
 export default defineConfig({
@@ -8,9 +9,9 @@ export default defineConfig({
 	timeout: 60_000,
 	use: { baseURL: `http://localhost:${PORT}`, viewport: { width: 1440, height: 900 } },
 	webServer: {
-		command: `npx next dev -p ${PORT}`,
+		command: `npx next build && npx next start -p ${PORT}`,
 		url: `http://localhost:${PORT}/login`,
-		timeout: 180_000,
+		timeout: 300_000,
 		reuseExistingServer: false,
 		env: {
 			DATABASE_URL: "pglite",

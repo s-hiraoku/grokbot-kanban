@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -6,9 +7,14 @@ export const metadata: Metadata = {
 	description: "Kanban for Grok Bot studio agents",
 };
 
+export const viewport: Viewport = {
+	themeColor: "#161c36",
+	colorScheme: "dark",
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
 	return (
-		<html lang="en">
+		<html lang="en" className="dark">
 			<head>
 				<link rel="preconnect" href="https://fonts.googleapis.com" />
 				<link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
@@ -17,7 +23,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 					rel="stylesheet"
 				/>
 			</head>
-			<body>{children}</body>
+			<body>
+				<TooltipProvider delayDuration={400}>{children}</TooltipProvider>
+			</body>
 		</html>
 	);
 }

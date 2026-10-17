@@ -1,14 +1,18 @@
 "use client";
 
-import * as Popover from "@radix-ui/react-popover";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { CheckIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
+import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import type { MemberView } from "@/lib/view";
 
 /**
  * GitHub-style assignees: the field lists only who holds the card, and Edit opens a searchable list
- * where each click toggles one member. The list is a Radix popover, so it floats above the drawer, flips
- * to fit the window, and stays open so several can be picked in a row.
+ * where each pick toggles one member. The list floats above the drawer, flips to fit the window, and stays
+ * open so several can be picked in a row.
  */
 export default function AssigneePicker({
 	members,
@@ -20,141 +24,87 @@ export default function AssigneePicker({
 	onChange: (next: string[]) => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const [query, setQuery] = useState("");
-	const [cursor, setCursor] = useState(0);
-	const box = useRef<HTMLDivElement>(null);
-	const search = useRef<HTMLInputElement>(null);
-	const listId = useId();
-
 	const chosen = selected.map((id) => members.find((member) => member.id === id)).filter((member): member is MemberView => Boolean(member));
 	// Selected members first, in assignment order, then everyone else in roster order, as GitHub does.
-	const options = useMemo(() => {
-		const needle = query.trim().toLowerCase();
-		const matches = members.filter((member) => !needle || member.name.toLowerCase().includes(needle));
-		return [...matches.filter((member) => selected.includes(member.id)), ...matches.filter((member) => !selected.includes(member.id))];
-		// The order is fixed when the menu opens or the query changes, so a toggle does not move rows under the pointer.
-	}, [members, query, open]);
-
-	useEffect(() => setCursor(0), [query]);
-
+	const options = useMemo(
+		() => [...members.filter((member) => selected.includes(member.id)), ...members.filter((member) => !selected.includes(member.id))],
+		// The order is fixed when the list opens, so a pick does not move rows under the pointer.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[members, open],
+	);
 	const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]);
-	const openChange = (next: boolean) => {
-		if (next) {
-			setQuery("");
-			setCursor(0);
-		}
-		setOpen(next);
-	};
 
 	return (
-		<Popover.Root open={open} onOpenChange={openChange}>
-			<div className="assignees" ref={box}>
-				<div className="assignees-head">
-					<span className="assignees-label" id={`${listId}-label`}>
+		<Popover open={open} onOpenChange={setOpen}>
+			<div className="grid gap-1.5">
+				<div className="flex items-center justify-between">
+					<p className="text-xs font-bold text-muted-foreground" id="assignees-label">
 						Assignees
-					</span>
-					<Popover.Trigger asChild>
-						<button type="button" className="ghost small assignees-edit" aria-haspopup="listbox">
+					</p>
+					<PopoverTrigger asChild>
+						<Button type="button" variant="ghost" size="xs" className="data-[state=open]:text-primary">
 							{open ? "Done" : "Edit"}
-						</button>
-					</Popover.Trigger>
+						</Button>
+					</PopoverTrigger>
 				</div>
 
 				{chosen.length ? (
-					<ul className="assignees-list" aria-labelledby={`${listId}-label`}>
+					<ul className="grid gap-1.5" aria-labelledby="assignees-label" data-slot="assignees">
 						{chosen.map((member) => (
-							<li key={member.id}>
+							<li key={member.id} className="flex min-w-0 items-center gap-2 text-[13px]">
 								<MemberAvatar member={member} size={22} />
-								<span lang="ja">{member.name}</span>
+								<span className="truncate" lang="ja">
+									{member.name}
+								</span>
 							</li>
 						))}
 					</ul>
 				) : (
-					<p className="assignees-none">
+					<p className="text-[13px] text-muted-foreground" data-slot="assignees">
 						No one.{" "}
 						{members.some((member) => member.kind === "owner") ? (
-							<button type="button" className="link" onClick={() => onChange(["owner"])}>
+							<button type="button" className="text-primary underline underline-offset-3" onClick={() => onChange(["owner"])}>
 								Assign yourself
 							</button>
 						) : null}
 					</p>
 				)}
+			</div>
 
-				<Popover.Portal>
-					<Popover.Content
-						className="assignees-menu"
-						align="end"
-						side="bottom"
-						sideOffset={6}
-						collisionPadding={8}
-						onOpenAutoFocus={(event) => {
-							event.preventDefault();
-							search.current?.focus();
-						}}
-					>
-						<p className="assignees-menu-title">Assign members</p>
-						<input
-							ref={search}
-							type="search"
-							className="assignees-search"
-							placeholder="Filter members"
-							value={query}
-							onChange={(event) => setQuery(event.target.value)}
-							aria-label="Filter members"
-							aria-controls={listId}
-							aria-activedescendant={options[cursor] ? `${listId}-${options[cursor].id}` : undefined}
-							lang="ja"
-							onKeyDown={(event) => {
-								if (event.key === "ArrowDown") {
-									event.preventDefault();
-									setCursor((value) => Math.min(value + 1, options.length - 1));
-								} else if (event.key === "ArrowUp") {
-									event.preventDefault();
-									setCursor((value) => Math.max(value - 1, 0));
-								} else if (event.key === "Enter") {
-									// Enter picks the highlighted member instead of saving the whole form.
-									event.preventDefault();
-									const member = options[cursor];
-									if (member) toggle(member.id);
-								}
-							}}
-						/>
-						<ul className="assignees-options" role="listbox" id={listId} aria-multiselectable="true" aria-label="Members">
-							{options.map((member, index) => {
+			<PopoverContent align="end" sideOffset={6} collisionPadding={8} className="flex max-h-(--radix-popover-content-available-height) w-[min(300px,calc(100vw-1rem))] flex-col overflow-hidden p-0" data-slot="assignee-menu">
+				<p className="border-b px-3 py-2 text-xs font-bold">Assign members</p>
+				<Command className="min-h-0 flex-1">
+					<CommandInput placeholder="Filter members" aria-label="Filter members" lang="ja" />
+					<CommandList className="max-h-80">
+						<CommandEmpty>No member matches.</CommandEmpty>
+						<CommandGroup>
+							{options.map((member) => {
 								const on = selected.includes(member.id);
 								return (
-									<li
-										key={member.id}
-										id={`${listId}-${member.id}`}
-										role="option"
-										aria-selected={on}
-										className={`${on ? "on" : ""}${index === cursor ? " cursor" : ""}`}
-										onPointerEnter={() => setCursor(index)}
-										// Keep focus in the filter, so typing and Escape still reach the menu after a click.
-										onMouseDown={(event) => event.preventDefault()}
-										onClick={() => toggle(member.id)}
-									>
-										<span className="check" aria-hidden="true">
-											{on ? "✓" : ""}
-										</span>
+									<CommandItem key={member.id} value={`${member.name} ${member.id}`} onSelect={() => toggle(member.id)} data-checked={on}>
+										<CheckIcon className={cn("text-primary", on ? "opacity-100" : "opacity-0")} aria-hidden="true" />
 										<MemberAvatar member={member} size={22} />
-										<span className="name" lang="ja">
+										<span className={cn("min-w-0 flex-1 truncate", on && "font-bold")} lang="ja">
 											{member.name}
 										</span>
-										{member.kind === "owner" ? <span className="muted small">owner</span> : null}
-									</li>
+										{member.kind === "owner" ? <span className="text-xs text-muted-foreground">owner</span> : null}
+									</CommandItem>
 								);
 							})}
-							{options.length === 0 ? <li className="assignees-empty">No member matches “{query}”.</li> : null}
-						</ul>
+						</CommandGroup>
 						{selected.length ? (
-							<button type="button" className="assignees-clear" onClick={() => onChange([])}>
-								Clear assignees
-							</button>
+							<>
+								<CommandSeparator />
+								<CommandGroup>
+									<CommandItem value="__clear" onSelect={() => onChange([])} className="text-xs text-muted-foreground">
+										Clear assignees
+									</CommandItem>
+								</CommandGroup>
+							</>
 						) : null}
-					</Popover.Content>
-				</Popover.Portal>
-			</div>
-		</Popover.Root>
+					</CommandList>
+				</Command>
+			</PopoverContent>
+		</Popover>
 	);
 }

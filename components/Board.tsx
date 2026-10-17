@@ -20,14 +20,21 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { ChevronLeftIcon, ChevronRightIcon, LogOutIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { MemberAvatar } from "@/components/Avatar";
 import BotsPanel from "@/components/BotsPanel";
 import CardDrawer from "@/components/CardDrawer";
 import CardPanel, { type CardHandlers } from "@/components/CardPanel";
+import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
+import Toasts, { showToast } from "@/components/Toasts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { COLUMNS, type Column, type ParkColumn } from "@/lib/domain";
-import { OFFLINE_TOAST, ONLINE_TOAST, UNREACHABLE_TOAST, commandToast, pushToast, type ToastMessage } from "@/lib/notify";
-import Toasts, { type ShownToast } from "@/components/Toasts";
+import { OFFLINE_TOAST, ONLINE_TOAST, UNREACHABLE_TOAST, commandToast, type ToastMessage } from "@/lib/notify";
+import { cn } from "@/lib/utils";
 import type { BoardView, BotView, CardView, MemberView } from "@/lib/view";
 
 export type Command =
@@ -43,6 +50,7 @@ export type Command =
 	| { type: "setOwnerAvatar"; avatar: string | null };
 
 type Order = Record<Column, string[]>;
+type DrawerTarget = { mode: "create" } | { mode: "edit"; cardId: string; dialog: boolean };
 
 const OWNER: MemberView = { id: "owner", name: "You", kind: "owner", avatar: null, color: "#f2b33d", initials: "You" };
 const MEMBER_DROP = "member:";
@@ -82,14 +90,15 @@ function orderOf(board: BoardView): Order {
 export default function Board({ initial, studioUrl }: { initial: BoardView; studioUrl: string | null }) {
 	const [board, setBoard] = useState(initial);
 	const [order, setOrder] = useState<Order>(() => orderOf(initial));
-	const [toasts, setToasts] = useState<ShownToast[]>([]);
-	const toastId = useRef(0);
-	const notify = useCallback((message: ToastMessage) => setToasts((current) => pushToast(current, { ...message, id: ++toastId.current })), []);
-	const dismiss = useCallback((id: number) => setToasts((current) => current.filter((item) => item.id !== id)), []);
+	const notify = useCallback((message: ToastMessage) => showToast(message), []);
 	const offline = useRef(0);
 	// A click on a card reads it in the side drawer; New card and Edit open the large dialog to write in.
-	const [drawer, setDrawer] = useState<{ mode: "create" } | { mode: "edit"; cardId: string; dialog: boolean } | null>(null);
+	// The last target stays set after closing, so the drawer can animate out with its content.
+	const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
+	const [drawerOpen, setDrawerOpen] = useState(false);
+	const [drawerSerial, setDrawerSerial] = useState(0);
 	const [botsOpen, setBotsOpen] = useState(false);
+	const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 	const [activeId, setActiveId] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
 	const [memberFilter, setMemberFilter] = useState<string | null>(null);
@@ -215,11 +224,16 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
 			const target = event.target as HTMLElement | null;
-			if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+			// Focus can still sit in a field of a drawer that is animating out; that field no longer takes typing.
+			const leaving = target?.closest('[role="dialog"][data-state="closed"]');
+			if (target && !leaving && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
 			if (event.metaKey || event.ctrlKey || event.altKey) return;
+			// Shortcuts are for the board itself, not while a drawer, dialog, or menu is in front of it.
+			// One that is only animating out no longer counts.
+			if (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"]')) return;
 			if (event.key === "n") {
 				event.preventDefault();
-				setDrawer({ mode: "create" });
+				openDrawer({ mode: "create" });
 			}
 			if (event.key === "/") {
 				event.preventDefault();
@@ -229,6 +243,14 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
+
+	const openDrawer = useCallback((target: DrawerTarget) => {
+		setDrawer(target);
+		setDrawerOpen(true);
+		// Each opening starts fresh, even for the card that was just closed.
+		setDrawerSerial((serial) => serial + 1);
+	}, []);
+	const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
 	async function send(command: Command): Promise<boolean> {
 		try {
@@ -257,16 +279,27 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const handlersFor = (card: CardView): CardHandlers => ({
 		onOpen: () => {
 			// The click that ends a drag is not a request to open the card.
-			if (Date.now() - droppedAt.current > 250) setDrawer({ mode: "edit", cardId: card.id, dialog: false });
+			if (Date.now() - droppedAt.current > 250) openDrawer({ mode: "edit", cardId: card.id, dialog: false });
 		},
-		onEdit: () => setDrawer({ mode: "edit", cardId: card.id, dialog: true }),
-		onDelete: () => {
-			if (window.confirm(`Delete “${card.title}”? This cannot be undone.`)) void send({ type: "deleteCard", cardId: card.id });
-		},
-		onRun: (botId) => void send({ type: "run", cardId: card.id, bot: botId }),
-		onStopRun: () => void send({ type: "stop", cardId: card.id }),
+		onEdit: () => openDrawer({ mode: "edit", cardId: card.id, dialog: true }),
+		onDelete: () => askDelete(card),
+		onRun: (botId) => send({ type: "run", cardId: card.id, bot: botId }),
+		onStopRun: () => send({ type: "stop", cardId: card.id }),
 		bots: board.bots,
 	});
+
+	function askDelete(card: CardView) {
+		setConfirm({
+			title: `Delete “${card.title}”?`,
+			description: "The card and its notes are removed for good. Bots can no longer see it.",
+			action: "Delete card",
+			danger: true,
+			onConfirm: async () => {
+				const ok = await send({ type: "deleteCard", cardId: card.id });
+				if (ok && drawer?.mode === "edit" && drawer.cardId === card.id) closeDrawer();
+			},
+		});
+	}
 
 	const needle = query.trim().toLowerCase();
 	const visible = (card: CardView) => {
@@ -389,39 +422,68 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const dialog = drawer?.mode === "create" || (drawer?.mode === "edit" && drawer.dialog);
 	const shown = board.columns.reduce((sum, column) => sum + column.cards.filter(visible).length, 0);
 
+	// The drawer for a card that was deleted elsewhere closes instead of turning into a blank new card.
+	useEffect(() => {
+		if (drawerOpen && drawer?.mode === "edit" && !cards.has(drawer.cardId)) {
+			setDrawerOpen(false);
+			notify({ text: "That card was deleted.", tone: "info" });
+		}
+	}, [cards, drawer, drawerOpen, notify]);
+
 	return (
 		<DndContext id="board" sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
-			<div className={`shell${activeCard ? " is-dragging" : ""}`}>
-				<header className="top">
-					<div className="brand">
+			<div
+				className={cn(
+					"grid min-h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] [grid-template-areas:'top'_'dock'_'lanes']",
+					"md:h-dvh md:min-h-0 md:grid-cols-[104px_minmax(0,1fr)] md:grid-rows-[auto_minmax(0,1fr)] md:overflow-hidden md:[grid-template-areas:'top_top'_'dock_lanes']",
+					activeCard && "select-none",
+				)}
+			>
+				<header className="sticky top-0 z-10 flex flex-wrap items-center gap-2.5 border-b bg-deck-2 px-4 py-2.5 [grid-area:top] md:static md:flex-nowrap md:gap-3.5 md:px-[18px] md:py-3">
+					<div className="flex flex-none items-center gap-1.5 md:w-[86px]">
 						{studioUrl ? (
-							<a className="studio" href={studioUrl} aria-label="Back to the studio">
-								‹
+							<a className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" href={studioUrl} aria-label="Back to the studio">
+								<ChevronLeftIcon className="size-5" />
 							</a>
 						) : null}
-						<h1>Grok Bot</h1>
+						<h1 className="font-display text-[19px] font-bold whitespace-nowrap">Grok Bot</h1>
 					</div>
-					<label className="search">
-						<span className="visually-hidden">Search cards</span>
-						<svg viewBox="0 0 20 20" aria-hidden="true">
-							<circle cx="9" cy="9" r="5.5" />
-							<path d="M13.2 13.2 17 17" />
-						</svg>
-						<input id="board-search" type="search" placeholder="Search cards" value={query} onChange={(event) => setQuery(event.target.value)} lang="ja" />
-						<kbd>/</kbd>
+					<label className="relative order-3 flex basis-full items-center md:order-none md:max-w-[420px] md:flex-1 md:basis-auto">
+						<span className="sr-only">Search cards</span>
+						<SearchIcon className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+						<Input
+							id="board-search"
+							type="search"
+							placeholder="Search cards"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Escape" && query) {
+									event.preventDefault();
+									setQuery("");
+								}
+							}}
+							lang="ja"
+							className="bg-background pr-9 pl-8 dark:bg-background"
+						/>
+						<Kbd className="absolute right-2 max-md:hidden">/</Kbd>
 					</label>
-					<button type="button" className="primary new-card" onClick={() => setDrawer({ mode: "create" })} title="Shortcut: n">
-						<span aria-hidden="true">＋</span> New card
-					</button>
+					<Button className="ml-auto" onClick={() => openDrawer({ mode: "create" })} title="Shortcut: n">
+						<PlusIcon />
+						New card
+					</Button>
 				</header>
 
-				<nav className="dock" aria-label="Team">
+				<nav
+					aria-label="Team"
+					className="flex min-h-0 items-center gap-1.5 overflow-x-auto border-b bg-deck-2 px-3 py-2 select-none [grid-area:dock] md:flex-col md:items-stretch md:overflow-hidden md:border-r md:border-b-0 md:px-2 md:py-3"
+				>
 					{/* Header and footer stay put; only the bots scroll between them. */}
-					<div className="dock-head">
-						<p className="dock-hint">{activeCard ? "Drop to assign" : "Team"}</p>
+					<div className="flex flex-none items-center gap-1 md:grid md:border-b md:pb-2">
+						<p className={cn("mx-1 mb-0.5 text-center text-[11px] whitespace-nowrap text-muted-foreground max-md:hidden", activeCard && "text-primary")}>{activeCard ? "Drop to assign" : "Team"}</p>
 						<DockMember member={owner} load={ownerLoad} active={memberFilter === OWNER.id} onClick={() => setMemberFilter((current) => (current === OWNER.id ? null : OWNER.id))} droppable={Boolean(activeCard)} />
 					</div>
-					<div className="dock-list">
+					<div className="flex flex-none gap-1 md:min-h-0 md:flex-1 md:flex-col md:overflow-y-auto md:overscroll-contain md:py-0.5 md:[scrollbar-width:thin]">
 						{board.bots.map((bot) => (
 							<DockMember
 								key={bot.id}
@@ -432,53 +494,49 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 								droppable={Boolean(activeCard)}
 							/>
 						))}
-						{board.bots.length === 0 ? <p className="dock-empty">No bots yet</p> : null}
-					</div>
-					<div className="dock-foot">
-						<button
-							type="button"
-							className={`dock-item dock-none${memberFilter === "none" ? " active" : ""}`}
-							aria-pressed={memberFilter === "none"}
-							onClick={() => setMemberFilter((current) => (current === "none" ? null : "none"))}
-							title="Open cards with no assignee"
-						>
-							<span className="dock-face" aria-hidden="true">
-								<span className="none-ring" />
-							</span>
-							<span className="dock-name">Unassigned</span>
-							<span className="dock-load">{unassigned}</span>
-						</button>
-						<button type="button" className="ghost" onClick={() => setBotsOpen(true)}>
-							Bots & MCP
-						</button>
-						<form method="post" action="/api/auth/logout">
-							<button type="submit" className="ghost quiet">
-								Sign out
+						{board.bots.length === 0 ? (
+							<button type="button" className="mx-1 my-2 rounded-md text-center text-[11px] text-faint hover:text-foreground max-md:hidden" onClick={() => setBotsOpen(true)}>
+								No bots yet. Connect one
 							</button>
+						) : null}
+					</div>
+					<div className="ml-auto flex flex-none items-center gap-1 md:ml-0 md:grid md:border-t md:pt-2">
+						<DockButton active={memberFilter === "none"} onClick={() => setMemberFilter((current) => (current === "none" ? null : "none"))} title="Open cards with no assignee" load={unassigned} label="Unassigned">
+							<span className="size-10 rounded-full border-2 border-dashed border-faint" />
+						</DockButton>
+						<Button variant="outline" size="sm" className="text-xs md:h-auto md:w-full md:px-1 md:py-1.5 md:whitespace-normal" onClick={() => setBotsOpen(true)}>
+							<SettingsIcon className="md:hidden" />
+							Bots & MCP
+						</Button>
+						<form method="post" action="/api/auth/logout" className="m-0">
+							<Button type="submit" variant="ghost" size="sm" className="text-xs text-muted-foreground md:w-full">
+								<LogOutIcon className="md:hidden" />
+								Sign out
+							</Button>
 						</form>
 					</div>
 				</nav>
 
-				<main className="lanes">
+				<main className="flex min-h-0 flex-col [grid-area:lanes]">
 					{filtering ? (
-						<p className="filter-note" role="status">
-							Showing {shown} of {cards.size} cards
-							<button
-								type="button"
-								className="link"
+						<p className="mx-4 mt-2.5 flex items-center gap-3 text-[13px] text-muted-foreground md:mx-[18px]" role="status">
+							Showing {shown} of {cards.size} {cards.size === 1 ? "card" : "cards"}
+							<Button
+								variant="link"
+								size="xs"
+								className="h-auto px-0"
 								onClick={() => {
 									setQuery("");
 									setMemberFilter(null);
 								}}
 							>
 								Clear filters
-							</button>
+							</Button>
 						</p>
 					) : null}
-					<div className="columns">
+					<div className="flex min-h-0 flex-1 snap-x snap-mandatory items-stretch gap-2.5 overflow-x-auto px-4 pt-3 pb-6 md:snap-none md:gap-3 md:px-[18px] md:pt-3.5 md:pb-[18px]">
 						{board.columns.map((column) => {
 							const ids = (order[column.id] ?? []).filter((id) => cards.has(id) && visible(cards.get(id)!));
-							const state = activeCard ? "can-drop" : "";
 							const isFolded = folded.includes(column.id);
 							return (
 								<ColumnShell
@@ -486,20 +544,19 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 									id={column.id}
 									label={column.label}
 									count={(order[column.id] ?? []).length}
-									state={state}
+									canDrop={Boolean(activeCard)}
 									folded={isFolded}
 									onFold={FOLDABLE.includes(column.id) ? () => toggleFold(column.id) : null}
 									onAdd={column.id === "inbox" ? () => setQuickAdd(true) : null}
 								>
 									{column.id === "inbox" && quickAdd ? (
-										<QuickAdd
-											onCancel={() => setQuickAdd(false)}
-											onAdd={async (title) => send({ type: "create", content: { title } })}
-										/>
+										<QuickAdd onCancel={() => setQuickAdd(false)} onAdd={async (title) => send({ type: "create", content: { title } })} />
 									) : null}
 									{isFolded ? null : (
 										<SortableContext items={ids} strategy={verticalListSortingStrategy}>
-											{ids.length === 0 ? <p className="empty">{filtering ? "No matching cards" : emptyText(column.id)}</p> : null}
+											{ids.length === 0 ? (
+												<p className="rounded-lg border border-dashed px-3 py-[18px] text-center text-xs text-faint">{filtering ? "No matching cards" : emptyText(column.id)}</p>
+											) : null}
 											{ids.map((id) => {
 												const card = cards.get(id)!;
 												return <SortableCard key={id} card={card} handlers={handlersFor(card)} highlighted={highlight === id} />;
@@ -512,55 +569,109 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 					</div>
 				</main>
 
-				<DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>{activeCard ? <CardPanel card={activeCard} handlers={handlersFor(activeCard)} overlay className={overMember ? "to-member" : undefined} /> : null}</DragOverlay>
+				<DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
+					{activeCard ? <CardPanel card={activeCard} handlers={handlersFor(activeCard)} overlay toMember={overMember} /> : null}
+				</DragOverlay>
 
 				{drawer ? (
 					<CardDrawer
-						key={`${editing?.id ?? "new"}:${dialog ? "dialog" : "drawer"}`}
+						key={drawerSerial}
+						open={drawerOpen}
 						card={editing}
 						dialog={dialog}
 						members={members}
-						onClose={() => setDrawer(null)}
+						onClose={closeDrawer}
+						onDelete={askDelete}
 						send={send}
 						notify={notify}
 						onSubmit={async (payload) => {
 							const ok = editing ? await send({ type: "edit", cardId: editing.id, patch: payload }) : await send({ type: "create", content: payload });
-							if (ok) setDrawer(null);
+							if (ok) closeDrawer();
 							return ok;
 						}}
 					/>
 				) : null}
-				{botsOpen ? <BotsPanel bots={board.bots} owner={owner} onClose={() => setBotsOpen(false)} send={send} notify={notify} /> : null}
-				<Toasts toasts={toasts} onDismiss={dismiss} />
+				<BotsPanel open={botsOpen} bots={board.bots} owner={owner} onClose={() => setBotsOpen(false)} send={send} notify={notify} />
+				<ConfirmDialog request={confirm} onDone={() => setConfirm(null)} />
+				<Toasts />
 			</div>
 		</DndContext>
 	);
 }
 
+/** One face in the dock: filter by it with a click, or drop a card on it to assign that member. */
 function DockMember({ member, load, active, onClick, droppable }: { member: MemberView | BotView; load: number; active: boolean; onClick: () => void; droppable: boolean }) {
 	const { setNodeRef, isOver } = useDroppable({ id: `${MEMBER_DROP}${member.id}`, disabled: !droppable, data: { pinpoint: true } });
 	const bot = "role" in member ? member : null;
 	const title = bot ? [bot.name, bot.role, bot.lastSeen === null ? "Not seen yet" : bot.lastSeen === "just now" ? "Seen just now" : `Last seen ${bot.lastSeen} ago`].filter(Boolean).join("\n") : "You";
 	return (
-		<button
-			ref={setNodeRef}
-			type="button"
-			className={`dock-item${active ? " active" : ""}${isOver ? " over" : ""}`}
-			aria-pressed={active}
-			onClick={onClick}
-			title={title}
-			style={{ "--member": member.color } as React.CSSProperties}
-		>
-			<span className="dock-face">
-				<MemberAvatar member={member} size={40} />
-			</span>
-			<span className="dock-name" lang="ja">
-				{member.name}
-			</span>
-			<span className="dock-load" aria-label={`${load} cards`}>
-				{load}
-			</span>
-		</button>
+		<DockButton ref={setNodeRef} active={active} over={isOver} waiting={droppable} onClick={onClick} title={title} load={load} label={member.name} color={member.color}>
+			<MemberAvatar member={member} size={40} />
+		</DockButton>
+	);
+}
+
+function DockButton({
+	ref,
+	active,
+	over = false,
+	waiting = false,
+	onClick,
+	title,
+	load,
+	label,
+	color,
+	children,
+}: {
+	ref?: (node: HTMLElement | null) => void;
+	active: boolean;
+	over?: boolean;
+	/** A card is being dragged, so every face shows it takes a drop. */
+	waiting?: boolean;
+	onClick: () => void;
+	title: string;
+	load: number;
+	label: string;
+	color?: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					ref={ref}
+					type="button"
+					aria-pressed={active}
+					onClick={onClick}
+					aria-label={`${label}, ${load} ${load === 1 ? "card" : "cards"}`}
+					style={{ "--member": color ?? "var(--primary)" } as React.CSSProperties}
+					className={cn(
+						"group/dock relative grid w-[72px] flex-none cursor-pointer justify-items-center gap-1 rounded-xl border border-transparent px-1 pt-2 pb-1.5 text-foreground transition-colors hover:bg-deck md:w-auto md:min-w-0",
+						(active || over) && "border-(--member) bg-deck",
+					)}
+				>
+					<span
+						className={cn(
+							"grid size-11 place-items-center rounded-full transition-[box-shadow,transform] duration-150 [&>*]:shadow-[0_0_0_2px_var(--deck-2)]",
+							active && "[&>*]:shadow-[0_0_0_2px_var(--deck-2),0_0_0_4px_var(--member)]",
+							waiting && !active && "[&>*]:shadow-[0_0_0_2px_var(--deck-2),0_0_0_4px_var(--line)]",
+							over && "scale-110 [&>*]:shadow-[0_0_0_2px_var(--deck-2),0_0_0_4px_var(--member),0_0_22px_var(--member)]",
+						)}
+					>
+						{children}
+					</span>
+					<span className={cn("max-w-[84px] truncate text-[11px] text-muted-foreground group-hover/dock:text-foreground", active && "text-foreground")} lang="ja">
+						{label}
+					</span>
+					<span className="absolute top-1 right-3 grid h-5 min-w-5 place-items-center rounded-full border border-line bg-background px-1 font-display text-[11px] font-semibold" aria-hidden="true">
+						{load}
+					</span>
+				</button>
+			</TooltipTrigger>
+			<TooltipContent side="right" className="whitespace-pre-line" lang="ja">
+				{title}
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 
@@ -568,7 +679,7 @@ function ColumnShell({
 	id,
 	label,
 	count,
-	state,
+	canDrop,
 	folded,
 	onFold,
 	onAdd,
@@ -577,7 +688,7 @@ function ColumnShell({
 	id: Column;
 	label: string;
 	count: number;
-	state: string;
+	canDrop: boolean;
 	folded: boolean;
 	onFold: (() => void) | null;
 	onAdd: (() => void) | null;
@@ -585,24 +696,49 @@ function ColumnShell({
 }) {
 	const { setNodeRef, isOver } = useDroppable({ id: `column:${id}`, data: { pinpoint: folded } });
 	return (
-		<section ref={setNodeRef} className={`column col-${id} ${state}${isOver ? " over" : ""}${folded ? " folded" : ""}`} aria-label={label}>
-			<header>
-				<span className="lamp" aria-hidden="true" />
-				<h2>{label}</h2>
-				<span className="count">{count}</span>
-				{onAdd ? (
-					<button type="button" className="icon add" aria-label="Add a card to Inbox" title="Add a card" onClick={onAdd}>
-						＋
-					</button>
-				) : null}
-				{onFold ? (
-					<button type="button" className="icon fold" aria-label={folded ? `Show ${label}` : `Fold ${label}`} aria-expanded={!folded} onClick={onFold}>
-						{folded ? "›" : "‹"}
-					</button>
+		<section
+			ref={setNodeRef}
+			data-column={id}
+			aria-label={label}
+			className={cn(
+				"flex min-h-0 flex-col rounded-[14px] border bg-deck transition-colors [--surface:var(--deck)]",
+				"max-h-[calc(100dvh-220px)] flex-[0_0_calc(100vw-48px)] snap-center md:max-h-none md:max-w-[340px] md:min-w-[232px] md:flex-[1_1_232px]",
+				folded && "max-w-[52px] min-w-[52px] flex-[0_0_52px] md:max-w-[52px] md:min-w-[52px] md:flex-[0_0_52px]",
+				canDrop && "border-line",
+				canDrop && isOver && "border-primary bg-[#1f2848]",
+			)}
+		>
+			<header className={cn("flex items-center gap-2 py-2 pr-3 pl-3.5 pt-3 select-none", folded && "flex-col gap-2.5 px-0 py-3")}>
+				{onFold && folded ? <FoldButton label={label} folded onClick={onFold} /> : null}
+				<span aria-hidden="true" className={cn("size-2 flex-none rounded-full bg-(--lamp)", id === "inProgress" && "shadow-[0_0_8px_var(--lamp)]")} />
+				<h2 className={cn("font-display text-[15px] font-semibold tracking-[0.01em] whitespace-nowrap", folded && "text-sm [writing-mode:vertical-rl]")}>{label}</h2>
+				<span className="font-display text-[13px] font-semibold text-muted-foreground">{count}</span>
+				{onAdd || (onFold && !folded) ? (
+					<span className="ml-auto flex items-center">
+						{onAdd ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button variant="ghost" size="icon-sm" aria-label="Add a card to Inbox" className="text-muted-foreground hover:text-foreground" onClick={onAdd}>
+										<PlusIcon />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent>Add a card</TooltipContent>
+							</Tooltip>
+						) : null}
+						{onFold && !folded ? <FoldButton label={label} folded={false} onClick={onFold} /> : null}
+					</span>
 				) : null}
 			</header>
-			<div className="column-body">{children}</div>
+			<div className={cn("flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto px-2.5 pt-0.5 pb-3", folded && "min-h-0 p-0")}>{children}</div>
 		</section>
+	);
+}
+
+function FoldButton({ label, folded, onClick }: { label: string; folded: boolean; onClick: () => void }) {
+	return (
+		<Button variant="ghost" size="icon-sm" aria-label={folded ? `Show ${label}` : `Fold ${label}`} aria-expanded={!folded} className="text-muted-foreground hover:text-foreground" onClick={onClick}>
+			{folded ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+		</Button>
 	);
 }
 
@@ -611,22 +747,22 @@ function QuickAdd({ onAdd, onCancel }: { onAdd: (title: string) => Promise<boole
 	const [busy, setBusy] = useState(false);
 	const input = useRef<HTMLInputElement>(null);
 	useEffect(() => input.current?.focus(), []);
+	useEffect(() => {
+		if (!busy) input.current?.focus();
+	}, [busy]);
 	return (
 		<form
-			className="quick-add"
+			className="flex items-center gap-1.5"
 			onSubmit={async (event) => {
 				event.preventDefault();
 				if (!title.trim()) return;
 				setBusy(true);
 				const ok = await onAdd(title.trim());
 				setBusy(false);
-				if (ok) {
-					setTitle("");
-					input.current?.focus();
-				}
+				if (ok) setTitle("");
 			}}
 		>
-			<input
+			<Input
 				ref={input}
 				value={title}
 				onChange={(event) => setTitle(event.target.value)}
@@ -638,10 +774,11 @@ function QuickAdd({ onAdd, onCancel }: { onAdd: (title: string) => Promise<boole
 				maxLength={200}
 				lang="ja"
 				disabled={busy}
+				className="border-primary bg-background dark:bg-background"
 			/>
-			<button type="button" className="ghost small" onClick={onCancel}>
-				Done
-			</button>
+			<Button type="button" variant="ghost" size="icon-sm" aria-label="Stop adding cards" onClick={onCancel}>
+				<XIcon />
+			</Button>
 		</form>
 	);
 }
@@ -656,10 +793,11 @@ function SortableCard({ card, handlers, highlighted }: { card: CardView; handler
 			dragging={isDragging}
 			highlighted={highlighted}
 			style={{ transform: CSS.Translate.toString(transform), transition }}
-			className="grab"
+			className="active:cursor-grabbing"
 			{...attributes}
 			{...listeners}
 			aria-roledescription="draggable card"
+			aria-label={card.title || "Untitled"}
 		/>
 	);
 }

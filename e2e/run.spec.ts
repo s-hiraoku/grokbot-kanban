@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cardTitled, columnOf, expectFullyVisible, signIn, tool, unique } from "./helpers";
+import { cardTitled, columnOf, expectFullyVisible, openMenu, runStatus, signIn, tool, unique } from "./helpers";
 
 test("Run on a card with a Bot assignee starts the run at once, with no menu", async ({ page, request }) => {
 	const title = `assigned ${unique()}`;
@@ -7,8 +7,8 @@ test("Run on a card with a Bot assignee starts the run at once, with no menu", a
 	await signIn(page);
 
 	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
-	await expect(page.getByRole("menu")).toHaveCount(0);
-	await expect(cardTitled(page, title).locator(".pill-text")).toHaveText("Run requested");
+	await expect(openMenu(page)).toHaveCount(0);
+	await expect(runStatus(page, title)).toHaveText("Run requested");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Progress/);
 	const queue = await tool(request, "list_run_requests", { bot: "Ops" });
 	expect(queue.cards.map((card: { title: string }) => card.title)).toContain(title);
@@ -23,9 +23,9 @@ test("Run on a card with no Bot assignee asks which Bot, drawn above the cards b
 	await signIn(page);
 
 	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.getByRole("menuitem", { name: "Scout" }).click();
-	await expect(cardTitled(page, title).locator(".pill-text")).toHaveText("Run requested");
+	await expect(runStatus(page, title)).toHaveText("Run requested");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Progress/);
 });
 
@@ -39,14 +39,14 @@ test("menus on a card at the bottom of the screen open where every item can be p
 	await card.scrollIntoViewIfNeeded();
 
 	await card.getByRole("button", { name: "Run" }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.getByRole("menuitem").last().hover();
 	await page.keyboard.press("Escape");
 
 	await card.getByRole("button", { name: "Card actions" }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.keyboard.press("Escape");
-	await expect(page.getByRole("menu")).toHaveCount(0);
+	await expect(openMenu(page)).toHaveCount(0);
 });
 
 test("a running card's badge cancels the run", async ({ page, request }) => {
@@ -55,7 +55,7 @@ test("a running card's badge cancels the run", async ({ page, request }) => {
 	await signIn(page);
 	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
 	await cardTitled(page, title).getByRole("button", { name: /Waiting for Ops/ }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.getByRole("menuitem", { name: "Cancel run" }).click();
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", "Todo");
 	await expect(cardTitled(page, title).getByRole("button", { name: "Run" })).toBeVisible();

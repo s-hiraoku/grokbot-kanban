@@ -28,9 +28,3 @@ function fallbackFor(status: number): string {
 export const OFFLINE_TOAST: ToastMessage = { text: "Lost connection to the board. Retrying in the background.", tone: "warning" };
 export const ONLINE_TOAST: ToastMessage = { text: "Connected again. The board is up to date.", tone: "info" };
 export const UNREACHABLE_TOAST: ToastMessage = { text: "Could not reach the board. Check your connection and try again.", tone: "error" };
-
-/** Pushes a toast, dropping an identical one already showing and keeping the newest few. */
-export function pushToast<T extends ToastMessage & { id: number }>(current: readonly T[], next: T): T[] {
-	const rest = current.filter((item) => item.text !== next.text);
-	return [...rest, next].slice(-TOAST_LIMIT);
-}

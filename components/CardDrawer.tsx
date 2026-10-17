@@ -1,12 +1,27 @@
 "use client";
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon, Maximize2Icon, Minimize2Icon, MoreHorizontalIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react";
+import { Dialog as DialogPrimitive } from "radix-ui";
+import { Fragment, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { Menu, MenuItem, MenuNote, MenuTitle } from "@/components/ActionMenu";
 import AssigneePicker from "@/components/AssigneePicker";
-import { Menu, MenuItem, MenuNote, MenuTitle, popupOpen } from "@/components/ui/Menu";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
+import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { COLUMNS, RUNNABLE, runnerOf, type Column } from "@/lib/domain";
 import type { ToastMessage } from "@/lib/notify";
+import { cn } from "@/lib/utils";
 import type { CardView, MemberView } from "@/lib/view";
 
 const PRIORITIES = [
@@ -16,18 +31,22 @@ const PRIORITIES = [
 ] as const;
 
 /**
- * Opens beside the board to read, edit, and move one card, or to write a new one. The expand button
- * widens it into a large centered view with the details in a side column.
+ * Reads, edits, and moves one card, or writes a new one. It opens as a side drawer to read a card, or as a
+ * large centered dialog to write in; the expand button switches between the two while it is open. Closing
+ * with unsaved changes asks first.
  */
 export default function CardDrawer({
+	open,
 	card,
 	dialog = false,
 	members,
 	send,
 	notify,
 	onSubmit,
+	onDelete,
 	onClose,
 }: {
+	open: boolean;
 	card: CardView | null;
 	/** Opens as the large centered dialog instead of the side drawer, with the details ready to edit. */
 	dialog?: boolean;
@@ -35,6 +54,8 @@ export default function CardDrawer({
 	send: (command: Command) => Promise<boolean>;
 	notify: (message: ToastMessage) => void;
 	onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
+	/** Asks to delete the card; the board confirms first. */
+	onDelete: (card: CardView) => void;
 	onClose: () => void;
 }) {
 	const [title, setTitle] = useState(card?.title ?? "");
@@ -54,25 +75,11 @@ export default function CardDrawer({
 	const [editingBody, setEditingBody] = useState(dialog || !card?.body);
 	const [editingNotes, setEditingNotes] = useState(false);
 	const [wide, setWide] = useState(dialog);
+	const [moreOpen, setMoreOpen] = useState(!card || dialog);
 	const [busy, setBusy] = useState(false);
+	const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 	const first = useRef<HTMLTextAreaElement>(null);
 	const panel = useRef<HTMLFormElement>(null);
-
-	useEffect(() => {
-		if (!card) first.current?.focus();
-		else panel.current?.focus();
-		const onKey = (event: KeyboardEvent) => {
-			// An open menu or popover inside the panel takes Escape first.
-			if (event.key === "Escape" && !event.defaultPrevented && !popupOpen()) onClose();
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-		// Focus once on open, not on every board refresh.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [onClose]);
-
-	// The large view lasts until the drawer closes; every card opens in the drawer again.
-	const toggleWide = () => setWide((current) => !current);
 
 	const content = () => ({
 		title: title.trim(),
@@ -103,14 +110,22 @@ export default function CardDrawer({
 		if (screened !== card.screened || (screened && reviewer !== (card.reviewer === "grok" ? "grok" : "owner"))) patch.screening = next.screening;
 		return patch;
 	};
-	const dirty = card ? Object.keys(changes()).length > 0 : title.trim().length > 0;
+	const dirty = card ? Object.keys(changes()).length > 0 : title.trim().length > 0 || body.trim().length > 0;
 
-	const remove = async () => {
-		if (!card || !window.confirm(`Delete “${card.title}”? This cannot be undone.`)) return;
-		setBusy(true);
-		const ok = await send({ type: "deleteCard", cardId: card.id });
-		setBusy(false);
-		if (ok) onClose();
+	// Escape, a click outside, and × all come here, so nothing typed is lost without asking.
+	const requestClose = () => {
+		if (busy) return;
+		if (!dirty) {
+			onClose();
+			return;
+		}
+		setConfirm({
+			title: card ? "Discard your changes?" : "Discard this new card?",
+			description: card ? "The edits you made to this card have not been saved." : "What you typed will be lost.",
+			action: "Discard",
+			danger: true,
+			onConfirm: onClose,
+		});
 	};
 
 	const copyLink = async () => {
@@ -124,277 +139,429 @@ export default function CardDrawer({
 		}
 	};
 
+	const label = card ? `Card ${card.title}` : "New card";
+
 	return (
-		<div className={`drawer-scrim${wide ? " wide" : ""}`} onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
-			<form
-				ref={panel}
-				tabIndex={-1}
-				className={`drawer${wide ? " wide" : ""}`}
-				role="dialog"
-				aria-modal="true"
-				aria-label={card ? `Card ${card.title}` : "New card"}
-				onKeyDown={(event) => {
-					// Cmd or Ctrl + Enter saves from any field.
-					if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-						event.preventDefault();
-						event.currentTarget.requestSubmit();
-					}
-				}}
-				onSubmit={async (event) => {
-					event.preventDefault();
-					if (!dirty) {
-						onClose();
-						return;
-					}
-					setBusy(true);
-					await onSubmit(changes());
-					setBusy(false);
-				}}
-			>
-				<header className="drawer-head">
-					{card ? (
-						<StatusMenu column={card.column} onMove={(to) => void send({ type: "move", cardId: card.id, to })} />
-					) : (
-						<span className="status-button static col-inbox">
-							<span className="lamp" aria-hidden="true" />
-							New card for Inbox
-						</span>
+		<DialogPrimitive.Root open={open} onOpenChange={(next) => !next && requestClose()}>
+			<DialogPrimitive.Portal>
+				<DialogPrimitive.Overlay
+					className={cn(
+						"fixed inset-0 z-40 data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+						wide ? "bg-[#0a0e1cb8]" : "bg-[#0a0e1c80]",
 					)}
-					{card ? <RunMenu card={card} members={members} send={send} /> : null}
-					{card ? <span className="card-id">#{card.shortId}</span> : null}
-					<span className="drawer-tools">
-						<button type="button" className="icon" aria-label={wide ? "Show as side panel" : "Open in a large view"} aria-pressed={wide} title={wide ? "Side panel" : "Large view"} onClick={toggleWide}>
-							<svg viewBox="0 0 16 16" aria-hidden="true">
-								{wide ? <path d="M6.5 2v4.5H2M9.5 14V9.5H14M6.5 6.5 2 2m7.5 7.5L14 14" /> : <path d="M2 6.5V2h4.5M14 9.5V14H9.5M2 2l4.5 4.5M14 14 9.5 9.5" />}
-							</svg>
-						</button>
-						{card ? (
-							<Menu
-								trigger={
-									<button type="button" className="icon" aria-label="More actions" title="More actions">
-										<DotsIcon />
-									</button>
-								}
-							>
-								<MenuItem onSelect={() => void copyLink()}>Copy link</MenuItem>
-								<MenuItem danger onSelect={() => void remove()}>
-									Delete card
-								</MenuItem>
-							</Menu>
-						) : null}
-						<button type="button" className="icon" aria-label="Close" onClick={onClose}>
-							×
-						</button>
-					</span>
-				</header>
-
-				<div className="drawer-body">
-					<div className="drawer-main">
-						<label className="title-field">
-							<span className="visually-hidden">Title</span>
-							<GrowingText
-								inputRef={first}
-								value={title}
-								onChange={setTitle}
-								required
-								maxLength={200}
-								placeholder="What needs doing?"
-								onEnter={() => panel.current?.requestSubmit()}
-							/>
-						</label>
-						{card ? (
-							<p className="filed-line">
-								{card.createdBy ? <MemberAvatar member={card.createdBy} size={20} /> : null}
-								<span>
-									Filed by {card.createdBy?.name ?? "the API"}, {card.age === "just now" ? "just now" : `${card.age} ago`}
-								</span>
-							</p>
-						) : null}
-						{card?.run ? (
-							<p className={`run-banner ${card.run.status}`}>
-								<MemberAvatar member={card.run.bot} size={22} />
-								<span lang="ja">
-									{card.run.status === "working"
-										? `${card.run.bot.name} is working on this card (started ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). Its report lands in Notes.`
-										: `Waiting for ${card.run.bot.name} to pick this up (asked ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). The Bot checks on its routine.`}
-								</span>
-							</p>
-						) : null}
-
-						<section className="text-block" aria-labelledby="details-label">
-							<div className="block-head">
-								<h3 id="details-label">Details</h3>
-								{body && !editingBody ? (
-									<button type="button" className="ghost small" onClick={() => setEditingBody(true)}>
-										Edit
-									</button>
-								) : null}
-								{body && editingBody ? (
-									<button type="button" className="ghost small" onClick={() => setEditingBody(false)}>
-										Preview
-									</button>
-								) : null}
-							</div>
-							{editingBody ? (
-								<GrowingText value={body} onChange={setBody} className="body-input" minRows={wide ? 18 : 12} placeholder="What the bot reported, steps, context" autoFocus={Boolean(card)} />
+				/>
+				<DialogPrimitive.Content
+					aria-describedby={undefined}
+					data-slot="card-drawer"
+					data-wide={wide}
+					className={cn(
+						"fixed z-40 flex flex-col overflow-hidden bg-deck shadow-2xl outline-none [--surface:var(--deck)] duration-200",
+						// While it animates out it lets clicks through, so the board answers at once.
+						"data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+						wide
+							? "inset-0 md:inset-auto md:top-1/2 md:left-1/2 md:h-[min(900px,94dvh)] md:w-[min(1120px,94vw)] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-line data-[state=closed]:zoom-out-[0.98] data-[state=open]:zoom-in-[0.98]"
+							: "inset-y-0 right-0 w-full border-line md:w-[520px] md:border-l data-[state=closed]:slide-out-to-right-8 data-[state=open]:slide-in-from-right-8",
+					)}
+					onCloseAutoFocus={(event) => {
+						// When the next drawer opened while this one was leaving, focus stays with the new one.
+						if (document.querySelector('[data-slot="card-drawer"][data-state="open"]')) event.preventDefault();
+					}}
+					onOpenAutoFocus={(event) => {
+						// A new card starts in its title; an existing one takes focus itself, so Escape and Tab work at once.
+						event.preventDefault();
+						if (card) panel.current?.focus();
+						else first.current?.focus();
+					}}
+				>
+					<DialogPrimitive.Title className="sr-only">{label}</DialogPrimitive.Title>
+					<form
+						ref={panel}
+						tabIndex={-1}
+						aria-label={label}
+						className="flex min-h-0 flex-1 flex-col outline-none"
+						onKeyDown={(event) => {
+							// Cmd or Ctrl + Enter saves from any field.
+							if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+								event.preventDefault();
+								event.currentTarget.requestSubmit();
+							}
+						}}
+						onSubmit={async (event) => {
+							event.preventDefault();
+							if (!dirty) {
+								onClose();
+								return;
+							}
+							if (!title.trim()) {
+								first.current?.focus();
+								return;
+							}
+							setBusy(true);
+							await onSubmit(changes());
+							setBusy(false);
+						}}
+					>
+						<header className="flex flex-wrap items-center gap-2.5 border-b px-3.5 py-3">
+							{card ? (
+								<StatusMenu column={card.column} onMove={(to) => void send({ type: "move", cardId: card.id, to })} />
 							) : (
-								<div className="prose" lang="ja" onDoubleClick={() => setEditingBody(true)}>
-									<Prose text={body} />
+								<span data-column="inbox" className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] px-3 font-display text-[13px] font-semibold">
+									<Lamp />
+									New card for Inbox
+								</span>
+							)}
+							{card ? <RunMenu card={card} members={members} send={send} /> : null}
+							{card ? <span className="font-display text-xs text-faint">#{card.shortId}</span> : null}
+							<span className="ml-auto inline-flex items-center gap-0.5">
+								<IconButton label={wide ? "Show as side panel" : "Open in a large view"} aria-pressed={wide} onClick={() => setWide((current) => !current)} className="max-md:hidden">
+									{wide ? <Minimize2Icon /> : <Maximize2Icon />}
+								</IconButton>
+								{card ? (
+									<Menu
+										trigger={
+											<IconButton label="More actions">
+												<MoreHorizontalIcon />
+											</IconButton>
+										}
+									>
+										<MenuItem onSelect={() => void copyLink()}>
+											<LinkIcon />
+											Copy link
+										</MenuItem>
+										<MenuItem danger onSelect={() => onDelete(card)}>
+											<Trash2Icon />
+											Delete card
+										</MenuItem>
+									</Menu>
+								) : null}
+								<IconButton label="Close" onClick={requestClose}>
+									<XIcon />
+								</IconButton>
+							</span>
+						</header>
+
+						<div className={cn("min-h-0 flex-1 overflow-y-auto", wide && "md:grid md:grid-cols-[minmax(0,1fr)_320px] md:overflow-hidden")}>
+							<div className={cn("flex min-w-0 flex-col gap-5 px-5 pt-5 pb-2", wide && "md:overflow-y-auto md:px-10 md:pt-7 md:pb-8")}>
+								<div>
+									<label className="block">
+										<span className="sr-only">Title</span>
+										<GrowingText
+											inputRef={first}
+											value={title}
+											onChange={setTitle}
+											required
+											maxLength={200}
+											placeholder="What needs doing?"
+											onEnter={() => panel.current?.requestSubmit()}
+											className={cn(
+												"-ml-2 min-h-0 border-transparent bg-transparent px-2 py-1 font-bold shadow-none break-words hover:border-border focus-visible:bg-background dark:bg-transparent",
+												wide ? "text-[22px] leading-[1.45] md:text-[28px] md:leading-[1.4]" : "text-[22px] leading-[1.45] md:text-[22px]",
+											)}
+										/>
+									</label>
+									{card ? (
+										<p className="mt-1 flex items-center gap-2 text-[13px] text-muted-foreground">
+											{card.createdBy ? <MemberAvatar member={card.createdBy} size={20} /> : null}
+											<span>
+												Filed by {card.createdBy?.name ?? "the API"}, {card.age === "just now" ? "just now" : `${card.age} ago`}
+											</span>
+										</p>
+									) : null}
 								</div>
-							)}
-						</section>
-
-						<section className="text-block" aria-labelledby="notes-label">
-							<div className="block-head">
-								<h3 id="notes-label">Notes</h3>
-								{!editingNotes ? (
-									<button type="button" className="ghost small" onClick={() => setEditingNotes(true)}>
-										{notes ? "Edit" : "Add note"}
-									</button>
+								{card?.run ? (
+									<p
+										className={cn(
+											"flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-[13px] leading-relaxed",
+											card.run.status === "working" ? "bg-teal-soft text-[#b5f3e3]" : "bg-amber-soft text-[#f6d48f]",
+										)}
+										role="status"
+									>
+										<MemberAvatar member={card.run.bot} size={22} />
+										<span lang="ja">
+											{card.run.status === "working"
+												? `${card.run.bot.name} is working on this card (started ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). Its report lands in Notes.`
+												: `Waiting for ${card.run.bot.name} to pick this up (asked ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). The Bot checks on its routine.`}
+										</span>
+									</p>
 								) : null}
-							</div>
-							{editingNotes ? (
-								<GrowingText value={notes} onChange={setNotes} className="notes-input" minRows={5} placeholder="Bots sign their notes here" autoFocus />
-							) : notes ? (
-								<NotesLog notes={notes} />
-							) : (
-								<p className="muted small">No notes yet.</p>
-							)}
-						</section>
-					</div>
 
-					<aside className="drawer-side" aria-label="Card details">
-						<div className="side-group">
-							<AssigneePicker members={members} selected={assignees} onChange={setAssignees} />
-							{members.length <= 1 ? <p className="muted small">Bots appear here once they use the board, or add one under Bots & MCP.</p> : null}
+								<TextBlock
+									title="Details"
+									action={
+										body ? (
+											<Button type="button" variant="ghost" size="xs" onClick={() => setEditingBody((current) => !current)}>
+												{editingBody ? "Preview" : "Edit"}
+											</Button>
+										) : null
+									}
+								>
+									{editingBody ? (
+										<GrowingText
+											value={body}
+											onChange={setBody}
+											minRows={wide ? 18 : 12}
+											placeholder="What the bot reported, steps, context"
+											autoFocus={Boolean(card)}
+											aria-label="Details"
+											className={cn("bg-background px-3.5 py-3 text-[15px] leading-[1.8] dark:bg-background", wide ? "min-h-[420px]" : "min-h-[260px]")}
+										/>
+									) : (
+										<div className={cn("prose-card cursor-text", wide ? "min-h-[420px] md:max-w-[72ch] md:text-base" : "min-h-[260px]")} lang="ja" onDoubleClick={() => setEditingBody(true)}>
+											<Prose text={body} />
+										</div>
+									)}
+								</TextBlock>
+
+								<TextBlock
+									title="Notes"
+									action={
+										!editingNotes ? (
+											<Button type="button" variant="ghost" size="xs" onClick={() => setEditingNotes(true)}>
+												{notes ? "Edit" : "Add note"}
+											</Button>
+										) : null
+									}
+								>
+									{editingNotes ? (
+										<GrowingText value={notes} onChange={setNotes} minRows={5} placeholder="Bots sign their notes here" autoFocus aria-label="Notes" className="bg-background px-3.5 py-3 text-[13px] leading-[1.7] dark:bg-background" />
+									) : notes ? (
+										<NotesLog notes={notes} />
+									) : (
+										<p className="text-[13px] text-muted-foreground">No notes yet.</p>
+									)}
+								</TextBlock>
+							</div>
+
+							<aside
+								aria-label="Card fields"
+								className={cn("flex min-w-0 flex-col gap-5 border-t px-5 pt-5 pb-6", wide && "md:overflow-y-auto md:border-t-0 md:border-l md:bg-deck-2 md:px-5.5 md:pt-6 md:[--surface:var(--deck-2)]")}
+							>
+								<div className="grid gap-2">
+									<AssigneePicker members={members} selected={assignees} onChange={setAssignees} />
+									{members.length <= 1 ? <p className="text-xs text-muted-foreground">Bots appear here once they use the board, or add one under Bots & MCP.</p> : null}
+								</div>
+
+								<div className="grid gap-2">
+									<FieldLabel id="priority-label">Priority</FieldLabel>
+									<ToggleGroup
+										type="single"
+										variant="outline"
+										size="sm"
+										aria-labelledby="priority-label"
+										value={priority}
+										onValueChange={(value) => value && setPriority(value)}
+									>
+										{PRIORITIES.map((item) => (
+											<ToggleGroupItem
+												key={item.id}
+												value={item.id}
+												className={cn("px-3.5 data-[state=on]:font-bold", item.id === "high" && "data-[state=on]:bg-danger-soft data-[state=on]:text-[#ffd2ca]")}
+											>
+												{item.label}
+											</ToggleGroupItem>
+										))}
+									</ToggleGroup>
+								</div>
+
+								{card && (card.links.pr || card.links.agent || card.originalLink) ? (
+									<div className="grid gap-2">
+										<FieldLabel>Links</FieldLabel>
+										<ul className="grid gap-1.5 text-[13px] [&_a]:text-link">
+											{card.links.pr ? (
+												<li>
+													<a href={card.links.pr} target="_blank" rel="noreferrer">
+														Pull request
+													</a>
+												</li>
+											) : null}
+											{card.originalLink ? (
+												<li>
+													<a href={card.originalLink} target="_blank" rel="noreferrer">
+														Original post
+													</a>
+												</li>
+											) : null}
+											{card.links.agent ? (
+												<li>
+													<a href={card.links.agent} target="_blank" rel="noreferrer">
+														Past Cursor agent
+													</a>
+												</li>
+											) : null}
+										</ul>
+									</div>
+								) : null}
+
+								<Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
+									<CollapsibleTrigger className="flex items-center gap-1.5 rounded-sm text-xs font-bold text-muted-foreground hover:text-foreground">
+										<ChevronRightIcon className={cn("size-3.5 transition-transform", moreOpen && "rotate-90")} />
+										More fields
+									</CollapsibleTrigger>
+									<CollapsibleContent className="-mx-1 overflow-hidden px-1 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+										<div className="grid gap-3 pt-3 pb-1">
+											<div className={cn("grid grid-cols-1 gap-3", !wide && "sm:grid-cols-2")}>
+												<Field label="Repo" className={cn(!wide && "sm:col-span-2")}>
+													<Input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="https://github.com/org/repo" inputMode="url" />
+												</Field>
+												<Field label="Branch">
+													<Input value={ref} onChange={(event) => setRef(event.target.value)} placeholder="main" />
+												</Field>
+												<Field label="Source">
+													<Input value={source} onChange={(event) => setSource(event.target.value)} placeholder="x, slack" />
+												</Field>
+												<Field label="Original post" className={cn(!wide && "sm:col-span-2")}>
+													<Input value={originalLink} onChange={(event) => setOriginalLink(event.target.value)} placeholder="https://" inputMode="url" />
+												</Field>
+												<div className="grid gap-1.5">
+													<FieldLabel id="kind-label">Kind</FieldLabel>
+													<Select value={kind} onValueChange={setKind}>
+														<SelectTrigger aria-labelledby="kind-label" className="w-full">
+															<SelectValue />
+														</SelectTrigger>
+														<SelectContent>
+															<SelectItem value="text">Text</SelectItem>
+															<SelectItem value="voice">Voice</SelectItem>
+														</SelectContent>
+													</Select>
+												</div>
+												{kind === "voice" ? (
+													<Field label="Seconds">
+														<Input value={seconds} onChange={(event) => setSeconds(event.target.value)} inputMode="numeric" />
+													</Field>
+												) : null}
+											</div>
+											<div className="flex flex-wrap items-center gap-2.5 text-[13px]">
+												<Label className="cursor-pointer gap-2 text-[13px] font-normal">
+													<Checkbox checked={screened} onCheckedChange={(value) => setScreened(value === true)} />
+													Screened for moderation
+												</Label>
+												{screened ? (
+													<Select value={reviewer} onValueChange={setReviewer}>
+														<SelectTrigger size="sm" aria-label="Screened by">
+															<SelectValue />
+														</SelectTrigger>
+														<SelectContent>
+															<SelectItem value="owner">by you</SelectItem>
+															<SelectItem value="grok">by Grok</SelectItem>
+														</SelectContent>
+													</Select>
+												) : null}
+											</div>
+										</div>
+									</CollapsibleContent>
+								</Collapsible>
+							</aside>
 						</div>
 
-						<fieldset className="side-group field">
-							<legend>Priority</legend>
-							<div className="segmented" role="radiogroup" aria-label="Priority">
-								{PRIORITIES.map((item) => (
-									<button key={item.id} type="button" role="radio" aria-checked={priority === item.id} className={priority === item.id ? `on p-${item.id}` : ""} onClick={() => setPriority(item.id)}>
-										{item.label}
-									</button>
-								))}
-							</div>
-						</fieldset>
+						<footer className="flex flex-wrap items-center gap-2 border-t bg-deck-2 px-4 py-3">
+							<span className="text-xs text-muted-foreground">
+								{card && !dirty ? (
+									"No unsaved changes"
+								) : (
+									<>
+										{card ? "Unsaved changes" : "Lands in Inbox"} · <Kbd>⌘</Kbd>
+										<Kbd>Enter</Kbd> to save
+									</>
+								)}
+							</span>
+							<span className="ml-auto inline-flex gap-2">
+								<Button type="button" variant="outline" onClick={requestClose} disabled={busy}>
+									{card && !dirty ? "Close" : "Cancel"}
+								</Button>
+								<Button type="submit" disabled={busy || !title.trim() || (card !== null && !dirty)}>
+									{busy ? <Spinner /> : null}
+									{card ? "Save changes" : "Add to Inbox"}
+								</Button>
+							</span>
+						</footer>
+					</form>
+				</DialogPrimitive.Content>
+			</DialogPrimitive.Portal>
+			<ConfirmDialog request={confirm} onDone={() => setConfirm(null)} />
+		</DialogPrimitive.Root>
+	);
+}
 
-						{card && (card.links.pr || card.links.agent || card.originalLink) ? (
-							<div className="side-group">
-								<p className="side-label">Links</p>
-								<ul className="link-list">
-									{card.links.pr ? (
-										<li>
-											<a href={card.links.pr} target="_blank" rel="noreferrer">
-												Pull request
-											</a>
-										</li>
-									) : null}
-									{card.originalLink ? (
-										<li>
-											<a href={card.originalLink} target="_blank" rel="noreferrer">
-												Original post
-											</a>
-										</li>
-									) : null}
-									{card.links.agent ? (
-										<li>
-											<a href={card.links.agent} target="_blank" rel="noreferrer">
-												Past Cursor agent
-											</a>
-										</li>
-									) : null}
-								</ul>
-							</div>
-						) : null}
+function IconButton({ label, className, children, ...props }: { label: string } & ComponentProps<"button">) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<Button type="button" variant="ghost" size="icon-sm" aria-label={label} className={cn("text-muted-foreground hover:text-foreground", className)} {...props}>
+					{children}
+				</Button>
+			</TooltipTrigger>
+			<TooltipContent>{label}</TooltipContent>
+		</Tooltip>
+	);
+}
 
-						<details className="side-group more-fields" open={!card || wide}>
-							<summary>More fields</summary>
-							<div className="field-grid">
-								<label className="field wide">
-									<span>Repo</span>
-									<input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="https://github.com/org/repo" inputMode="url" />
-								</label>
-								<label className="field">
-									<span>Branch</span>
-									<input value={ref} onChange={(event) => setRef(event.target.value)} placeholder="main" />
-								</label>
-								<label className="field">
-									<span>Source</span>
-									<input value={source} onChange={(event) => setSource(event.target.value)} placeholder="x, slack" />
-								</label>
-								<label className="field wide">
-									<span>Original post</span>
-									<input value={originalLink} onChange={(event) => setOriginalLink(event.target.value)} placeholder="https://" inputMode="url" />
-								</label>
-								<label className="field">
-									<span>Kind</span>
-									<select value={kind} onChange={(event) => setKind(event.target.value)}>
-										<option value="text">Text</option>
-										<option value="voice">Voice</option>
-									</select>
-								</label>
-								{kind === "voice" ? (
-									<label className="field">
-										<span>Seconds</span>
-										<input value={seconds} onChange={(event) => setSeconds(event.target.value)} inputMode="numeric" />
-									</label>
-								) : null}
-							</div>
-							<div className="screen-row">
-								<label className="check">
-									<input type="checkbox" checked={screened} onChange={(event) => setScreened(event.target.checked)} />
-									Screened for moderation
-								</label>
-								{screened ? (
-									<select aria-label="Screened by" value={reviewer} onChange={(event) => setReviewer(event.target.value)}>
-										<option value="owner">by you</option>
-										<option value="grok">by Grok</option>
-									</select>
-								) : null}
-							</div>
-						</details>
-					</aside>
-				</div>
+function Lamp({ className }: { className?: string }) {
+	return <span aria-hidden="true" className={cn("size-2 flex-none rounded-full bg-(--lamp)", className)} />;
+}
 
-				<footer className="drawer-foot">
-					{card && !dirty ? <span className="muted small">No unsaved changes</span> : <span className="muted small">{card ? "Unsaved changes" : "Lands in Inbox"} · ⌘ Enter to save</span>}
-					<span className="foot-actions">
-						<button type="button" className="ghost" onClick={onClose}>
-							{card && !dirty ? "Close" : "Cancel"}
-						</button>
-						<button type="submit" className="primary" disabled={busy || !title.trim() || (card !== null && !dirty)}>
-							{card ? "Save changes" : "Add to Inbox"}
-						</button>
-					</span>
-				</footer>
-			</form>
-		</div>
+function FieldLabel({ id, children }: { id?: string; children: ReactNode }) {
+	return (
+		<p id={id} className="text-xs font-bold text-muted-foreground">
+			{children}
+		</p>
+	);
+}
+
+function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+	return (
+		<label className={cn("grid min-w-0 gap-1.5", className)}>
+			<span className="text-xs font-bold text-muted-foreground">{label}</span>
+			{children}
+		</label>
+	);
+}
+
+function TextBlock({ title, action, children }: { title: string; action: ReactNode; children: ReactNode }) {
+	return (
+		<section className="grid gap-2.5" aria-label={title}>
+			<div className="flex min-h-7 items-center justify-between gap-2 border-b pb-1.5">
+				<h3 className="font-display text-xs font-bold tracking-wider text-muted-foreground uppercase">{title}</h3>
+				{action}
+			</div>
+			{children}
+		</section>
 	);
 }
 
 /**
- * Run hands the card to a Grok Bot. The menu lists the card's bots first, then the rest of the roster;
- * a pending or working run shows here with Cancel run.
+ * Run hands the card to a Grok Bot. A Bot already on the card runs it straight away; otherwise the menu
+ * asks which one. A pending or working run shows here with Cancel run.
  */
 function RunMenu({ card, members, send }: { card: CardView; members: readonly MemberView[]; send: (command: Command) => Promise<boolean> }) {
+	const [busy, setBusy] = useState(false);
 	const bots = members.filter((member) => member.kind === "bot");
 	const run = card.run;
 	if (!run && !RUNNABLE.includes(card.column)) return null;
 	const verb = card.column === "inProgress" ? "Re-run" : "Run";
-	// A Bot already on the card runs it straight away; the menu is only for choosing one.
 	const runner = runnerOf(
 		card.assignees.map((member) => member.id),
 		bots,
 	);
+	const act = async (command: Command) => {
+		if (busy) return;
+		setBusy(true);
+		await send(command);
+		setBusy(false);
+	};
+	const chip = "inline-flex h-8 items-center gap-2 rounded-full border px-2.5 text-[13px] font-bold transition-colors disabled:opacity-60";
+	const play = busy ? <Spinner className="size-3.5" /> : <PlayIcon className="size-3 fill-current" />;
+
 	if (!run && runner) {
 		return (
-			<button type="button" className="run-button" title={`${verb} with ${runner.name}`} onClick={() => void send({ type: "run", cardId: card.id, bot: runner.id })}>
-				<svg className="play" viewBox="0 0 10 12" aria-hidden="true">
-					<path d="M1 1l8 5-8 5z" />
-				</svg>
-				<span>{verb}</span>
+			<button
+				type="button"
+				className={cn(chip, "border-teal-line bg-teal-soft text-teal hover:border-teal")}
+				title={`${verb} with ${runner.name}`}
+				disabled={busy}
+				onClick={() => void act({ type: "run", cardId: card.id, bot: runner.id })}
+			>
+				{play}
+				{verb}
 			</button>
 		);
 	}
@@ -404,21 +571,24 @@ function RunMenu({ card, members, send }: { card: CardView; members: readonly Me
 			trigger={
 				<button
 					type="button"
-					className={`run-button${run ? ` ${run.status}` : ""}`}
+					disabled={busy}
+					className={cn(
+						chip,
+						run?.status === "requested" ? "border-[#6b5520] bg-amber-soft text-primary hover:border-primary" : "border-teal-line bg-teal-soft text-teal hover:border-teal data-[state=open]:border-teal",
+					)}
 					aria-label={run ? `Run: ${run.status === "working" ? `${run.bot.name} working` : `waiting for ${run.bot.name}`}` : `${verb} with a Grok Bot`}
 				>
-					{run ? <MemberAvatar member={run.bot} size={18} /> : <svg className="play" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" /></svg>}
+					{run ? <MemberAvatar member={run.bot} size={18} /> : play}
 					<span>{run ? (run.status === "working" ? "Running" : "Requested") : verb}</span>
-					<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
-						<path d="M1 1l4 4 4-4" />
-					</svg>
+					<ChevronDownIcon className="size-3.5" />
 				</button>
 			}
 		>
 			{run ? (
 				<>
 					<MenuNote>{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</MenuNote>
-					<MenuItem danger onSelect={() => void send({ type: "stop", cardId: card.id })}>
+					<MenuItem danger onSelect={() => void act({ type: "stop", cardId: card.id })}>
+						<XIcon />
 						Cancel run
 					</MenuItem>
 				</>
@@ -427,7 +597,7 @@ function RunMenu({ card, members, send }: { card: CardView; members: readonly Me
 					<MenuTitle>{verb} with</MenuTitle>
 					{bots.length === 0 ? <MenuNote>No bots yet. Connect one under Bots & MCP.</MenuNote> : null}
 					{bots.map((bot) => (
-						<MenuItem key={bot.id} onSelect={() => void send({ type: "run", cardId: card.id, bot: bot.id })}>
+						<MenuItem key={bot.id} onSelect={() => void act({ type: "run", cardId: card.id, bot: bot.id })}>
 							<MemberAvatar member={bot} size={20} />
 							<span lang="ja">{bot.name}</span>
 						</MenuItem>
@@ -445,34 +615,27 @@ function StatusMenu({ column, onMove }: { column: Column; onMove: (to: Column) =
 		<Menu
 			align="start"
 			trigger={
-				<button type="button" className={`status-button col-${column}`} aria-label={`Status: ${label}. Move to another column`}>
-					<span className="lamp" aria-hidden="true" />
+				<button
+					type="button"
+					data-column={column}
+					className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] pr-2.5 pl-3 font-display text-[13px] font-semibold transition-colors hover:border-(--lamp) data-[state=open]:border-(--lamp)"
+					aria-label={`Status: ${label}. Move to another column`}
+				>
+					<Lamp />
 					<span>{label}</span>
-					<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
-						<path d="M1 1l4 4 4-4" />
-					</svg>
+					<ChevronDownIcon className="size-3.5 text-muted-foreground" />
 				</button>
 			}
 		>
 			<MenuTitle>Move to</MenuTitle>
 			{COLUMNS.map((item) => (
-				<MenuItem key={item.id} current={item.id === column} onSelect={() => item.id !== column && onMove(item.id)}>
-					<span className={`lamp col-${item.id}`} aria-hidden="true" />
+				<MenuItem key={item.id} current={item.id === column} onSelect={() => item.id !== column && onMove(item.id)} data-column={item.id}>
+					<Lamp />
 					{item.label}
-					{item.id === column ? <span className="menu-check" aria-hidden="true">✓</span> : null}
+					{item.id === column ? <CheckIcon className="ml-auto text-primary" aria-hidden="true" /> : null}
 				</MenuItem>
 			))}
 		</Menu>
-	);
-}
-
-function DotsIcon() {
-	return (
-		<svg viewBox="0 0 16 4" aria-hidden="true" className="dots">
-			<circle cx="2" cy="2" r="1.6" />
-			<circle cx="8" cy="2" r="1.6" />
-			<circle cx="14" cy="2" r="1.6" />
-		</svg>
 	);
 }
 
@@ -497,6 +660,7 @@ function GrowingText({
 	maxLength?: number;
 	placeholder?: string;
 	autoFocus?: boolean;
+	"aria-label"?: string;
 }) {
 	const own = useRef<HTMLTextAreaElement>(null);
 	const node = inputRef ?? own;
@@ -507,9 +671,9 @@ function GrowingText({
 		element.style.height = `${element.scrollHeight + 2}px`;
 	}, [value, node]);
 	return (
-		<textarea
+		<Textarea
 			ref={node}
-			className={className}
+			className={cn("[field-sizing:fixed] resize-none overflow-hidden", className)}
 			value={value}
 			rows={minRows}
 			lang="ja"
@@ -530,7 +694,7 @@ function GrowingText({
  * become lists, and URLs become links. Everything else stays as written, line breaks included.
  */
 function Prose({ text }: { text: string }) {
-	if (!text.trim()) return <p className="muted">No details yet. Double-click or press Edit to add them.</p>;
+	if (!text.trim()) return <p className="text-muted-foreground">No details yet. Double-click or press Edit to add them.</p>;
 	const out: ReactNode[] = [];
 	let lines: string[] = [];
 	let items: string[] = [];
@@ -589,16 +753,16 @@ function NotesLog({ notes }: { notes: string }) {
 		else entries.push({ stamp: null, author: null, lines: [line] });
 	}
 	return (
-		<ol className="notes-log" lang="ja">
+		<ol className="grid gap-3 border-l-2 pl-3.5" lang="ja">
 			{entries.map((entry, index) => (
-				<li key={index}>
+				<li key={index} className="relative before:absolute before:top-[7px] before:-left-[19px] before:size-2 before:rounded-full before:bg-line">
 					{entry.author ? (
-						<p className="note-meta">
+						<p className="mb-0.5 flex items-baseline gap-2 text-xs">
 							<strong>{entry.author}</strong>
-							<time>{entry.stamp}</time>
+							<time className="font-display text-faint">{entry.stamp}</time>
 						</p>
 					) : null}
-					<p className="note-text">
+					<p className="text-[13px] leading-[1.7] break-words text-[#cfd4ea] [&_a]:text-link">
 						{entry.lines.map((line, at) => (
 							<Fragment key={at}>
 								{at > 0 ? <br /> : null}
