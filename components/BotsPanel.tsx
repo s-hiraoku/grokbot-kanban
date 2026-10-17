@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { CheckIcon, CopyIcon, PlusIcon, UploadIcon, XIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
+import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import type { ToastMessage } from "@/lib/notify";
 import type { BotView, MemberView } from "@/lib/view";
 
@@ -11,32 +18,25 @@ const PALETTE = ["#7aa2ff", "#3dd68c", "#e2b340", "#e06c75", "#c678dd", "#56b6c2
 type Draft = { id: string | null; name: string; role: string; avatar: string; color: string; original: string };
 
 export default function BotsPanel({
+	open,
 	bots,
 	owner,
-	closing = false,
 	onClose,
 	send,
 	notify,
 }: {
 	bots: readonly BotView[];
 	owner: MemberView;
-	/** Plays the exit animation; the board removes the panel when it ends. */
-	closing?: boolean;
+	open: boolean;
 	onClose: () => void;
 	send: (command: Command) => Promise<boolean>;
 	notify: (message: ToastMessage) => void;
 }) {
 	const [tab, setTab] = useState<"roster" | "connect">(bots.length ? "roster" : "connect");
 	const [draft, setDraft] = useState<Draft | null>(null);
+	const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 	const [origin, setOrigin] = useState("");
 	useEffect(() => setOrigin(window.location.origin), []);
-	useEffect(() => {
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === "Escape") onClose();
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [onClose]);
 
 	const mcpUrl = `${origin}/api/mcp`;
 	const grokMessage = `カスタムMCPサーバーを追加してください。名前は kanban、Remote HTTPS で URL は ${mcpUrl} です。
@@ -71,98 +71,113 @@ export default function BotsPanel({
 }`;
 
 	return (
-		<div className={`modal-backdrop${closing ? " closing" : ""}`} onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
-			<div className="modal bots" role="dialog" aria-modal="true" aria-label="Bots and MCP">
-				<header className="modal-head">
-					<h2>Bots & MCP</h2>
-					<div className="tabs" role="tablist">
-						<button type="button" role="tab" aria-selected={tab === "roster"} className={tab === "roster" ? "on" : ""} onClick={() => setTab("roster")}>
-							Roster
-						</button>
-						<button type="button" role="tab" aria-selected={tab === "connect"} className={tab === "connect" ? "on" : ""} onClick={() => setTab("connect")}>
-							Connect Grok Bot
-						</button>
-					</div>
-					<button type="button" className="icon" aria-label="Close" onClick={onClose}>
-						×
-					</button>
-				</header>
-				{tab === "roster" ? (
-					<div className="roster-list">
-						<div className="bot-row owner-row">
+		<Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+			<DialogContent className="top-[6vh] max-h-[88dvh] translate-y-0 gap-0 overflow-y-auto bg-deck p-0 [--surface:var(--deck)] sm:max-w-[720px]" aria-describedby={undefined} showCloseButton={false}>
+				<Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} className="gap-0">
+					<DialogHeader className="sticky top-0 z-10 flex-row flex-wrap items-center gap-3 border-b bg-deck px-5 py-4 pr-14 text-left">
+						<DialogTitle className="font-display text-lg">Bots & MCP</DialogTitle>
+						<TabsList>
+							<TabsTrigger value="roster">Roster</TabsTrigger>
+							<TabsTrigger value="connect">Connect Grok Bot</TabsTrigger>
+						</TabsList>
+						{/* In the sticky header, so it stays in reach while the roster scrolls. */}
+						<DialogClose asChild>
+							<Button variant="ghost" size="icon-sm" className="absolute top-3.5 right-3.5" aria-label="Close">
+								<XIcon />
+							</Button>
+						</DialogClose>
+					</DialogHeader>
+					<TabsContent value="roster" className="grid gap-2 p-5">
+						<div className="flex flex-wrap items-center gap-3 rounded-xl border bg-deck-2 px-3 py-2.5 [--surface:var(--deck-2)]">
 							<MemberAvatar member={owner} size={34} />
-							<div className="bot-info">
+							<div className="mr-auto grid min-w-0 gap-0.5">
 								<strong>Your icon</strong>
-								<span className="muted small">Shown on the cards you file or hold</span>
+								<span className="text-xs text-muted-foreground">Shown on the cards you file or hold</span>
 							</div>
-							<label className="ghost small upload">
-								Upload image
-								<input
-									type="file"
-									accept="image/png,image/jpeg,image/webp,image/gif"
-									onChange={async (event) => {
-										const file = event.target.files?.[0];
-										event.target.value = "";
-										if (!file) return;
-										const avatar = await shrinkImage(file).catch(() => null);
-										if (avatar) void send({ type: "setOwnerAvatar", avatar });
-										else notify({ text: "That image could not be read. Try a PNG, JPEG, WebP or GIF.", tone: "error" });
-									}}
-								/>
-							</label>
-							<button type="button" className="ghost small" onClick={() => void send({ type: "setOwnerAvatar", avatar: null })}>
+							<UploadButton
+								label="Upload image"
+								onFile={async (file) => {
+									const avatar = await shrinkImage(file).catch(() => null);
+									if (avatar) void send({ type: "setOwnerAvatar", avatar });
+									else notify({ text: "That image could not be read. Try a PNG, JPEG, WebP or GIF.", tone: "error" });
+								}}
+							/>
+							<Button type="button" variant="ghost" size="sm" onClick={() => void send({ type: "setOwnerAvatar", avatar: null })}>
 								Default
-							</button>
+							</Button>
 						</div>
-						{bots.length === 0 ? <p className="muted">No bots yet. A Grok Bot joins the roster the first time it calls the board with its name.</p> : null}
+						{bots.length === 0 ? (
+							<p className="rounded-xl border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">
+								No bots yet. A Grok Bot joins the roster the first time it calls the board with its name.{" "}
+								<button type="button" className="text-primary underline underline-offset-3" onClick={() => setTab("connect")}>
+									Connect one
+								</button>
+							</p>
+						) : null}
 						{bots.map((bot) =>
 							draft?.id === bot.id ? (
 								<BotForm key={bot.id} draft={draft} setDraft={setDraft} onSave={async () => (await save(draft)) && setDraft(null)} onCancel={() => setDraft(null)} notify={notify} />
 							) : (
-								<div key={bot.id} className="bot-row">
+								<div key={bot.id} className="flex flex-wrap items-center gap-3 rounded-xl border bg-deck-2 px-3 py-2.5 [--surface:var(--deck-2)]">
 									<MemberAvatar member={bot} size={34} />
-									<div className="bot-info">
-										<strong>{bot.name}</strong>
-										<span className="muted small">{bot.role || "No role yet"}</span>
-										<span className="bot-stats">
+									<div className="mr-auto grid min-w-0 gap-0.5">
+										<strong lang="ja">{bot.name}</strong>
+										<span className="text-xs text-muted-foreground" lang="ja">
+											{bot.role || "No role yet"}
+										</span>
+										<span className="flex flex-wrap gap-3 text-xs text-faint">
 											<span>{bot.assigned} assigned</span>
 											<span>{bot.created} filed</span>
 											<span>{bot.lastSeen === null ? "Not seen yet" : bot.lastSeen === "just now" ? "Seen just now" : `Seen ${bot.lastSeen} ago`}</span>
 										</span>
 									</div>
-									<button
+									<Button
 										type="button"
-										className="ghost small"
+										variant="outline"
+										size="sm"
 										onClick={() => setDraft({ id: bot.id, name: bot.name, role: bot.role, avatar: bot.avatar ?? "", color: bot.color, original: bot.avatar ?? "" })}
 									>
 										Edit
-									</button>
-									<button
+									</Button>
+									<Button
 										type="button"
-										className="ghost small danger"
-										onClick={() => {
-											if (window.confirm(`Remove ${bot.name} from the roster? Its cards stay, unassigned from it.`)) void send({ type: "deleteBot", id: bot.id });
-										}}
+										variant="ghost"
+										size="sm"
+										className="text-destructive hover:text-destructive"
+										onClick={() =>
+											setConfirm({
+												title: `Remove ${bot.name}?`,
+												description: "Its cards stay on the board, unassigned from it. It joins the roster again the next time it calls the board.",
+												action: "Remove bot",
+												danger: true,
+												onConfirm: () => send({ type: "deleteBot", id: bot.id }),
+											})
+										}
 									>
 										Remove
-									</button>
+									</Button>
 								</div>
 							),
 						)}
 						{draft?.id === null ? (
 							<BotForm draft={draft} setDraft={setDraft} onSave={async () => (await save(draft)) && setDraft(null)} onCancel={() => setDraft(null)} notify={notify} />
 						) : (
-							<button type="button" className="ghost" onClick={() => setDraft({ id: null, name: "", role: "", avatar: "", color: PALETTE[bots.length % PALETTE.length] ?? PALETTE[0]!, original: "" })}>
-								＋ Add bot
-							</button>
+							<Button
+								type="button"
+								variant="outline"
+								className="justify-self-start"
+								onClick={() => setDraft({ id: null, name: "", role: "", avatar: "", color: PALETTE[bots.length % PALETTE.length] ?? PALETTE[0]!, original: "" })}
+							>
+								<PlusIcon />
+								Add bot
+							</Button>
 						)}
-						<p className="muted small">
+						<p className="text-xs text-muted-foreground">
 							Use the same name as the Grok Bot profile. The icon is one emoji or an https image URL, for example the avatar you set in Edit Profile.
 						</p>
-					</div>
-				) : (
-					<div className="connect">
-						<ol>
+					</TabsContent>
+					<TabsContent value="connect" className="p-5 text-sm leading-relaxed [&_code]:rounded-sm [&_code]:bg-background [&_code]:px-1.5 [&_code]:py-px [&_code]:text-xs">
+						<ol className="mb-4 grid list-decimal gap-3.5 pl-5">
 							<li>
 								Copy the board token from <code>BOT_TOKEN</code> in your deployment settings. Never paste it into a public chat or a shared Bot description.
 							</li>
@@ -182,22 +197,23 @@ export default function BotsPanel({
 								<CopyBlock text={routineMessage} />
 							</li>
 							<li>
-								Optional: let the Bot set its own icon. Grok Bot does not share profile images with connectors, so attach the Bot's icon image to this message. You can also upload it yourself under Roster.
+								Optional: let the Bot set its own icon. Grok Bot does not share profile images with connectors, so attach the Bot&apos;s icon image to this message. You can also upload it yourself under Roster.
 								<CopyBlock text={iconMessage} />
 							</li>
 						</ol>
-						<h3>Endpoint</h3>
+						<h3 className="mt-5 mb-1.5 font-display text-[15px] font-semibold">Endpoint</h3>
 						<CopyBlock text={mcpUrl} />
-						<p className="muted small">
+						<p className="mt-2 text-xs text-muted-foreground">
 							Streamable HTTP, stateless, JSON responses. Read tools are marked read-only so Auto-review can let them through. Bots can file, edit, assign, annotate, and move cards to any column. Only you can delete a card.
 						</p>
-						<h3>xAI API</h3>
-						<p className="muted small">The same server works as a remote MCP tool in the Responses API. Limit it to read tools when a script only needs to look.</p>
+						<h3 className="mt-5 mb-1.5 font-display text-[15px] font-semibold">xAI API</h3>
+						<p className="text-xs text-muted-foreground">The same server works as a remote MCP tool in the Responses API. Limit it to read tools when a script only needs to look.</p>
 						<CopyBlock text={apiSnippet} />
-					</div>
-				)}
-			</div>
-		</div>
+					</TabsContent>
+				</Tabs>
+			</DialogContent>
+			<ConfirmDialog request={confirm} onDone={() => setConfirm(null)} />
+		</Dialog>
 	);
 
 	async function save(value: Draft): Promise<boolean> {
@@ -238,82 +254,107 @@ function BotForm({
 	};
 	return (
 		<form
-			className="bot-form"
+			className="grid grid-cols-[auto_1fr] items-end gap-3 rounded-xl border border-primary p-3 sm:grid-cols-[auto_1fr_1fr_1fr]"
+			aria-label={draft.id ? `Edit ${draft.name}` : "New bot"}
 			onSubmit={(event) => {
 				event.preventDefault();
 				onSave();
 			}}
 		>
-			<MemberAvatar member={preview} size={34} />
-			<label>
+			<MemberAvatar member={preview} size={34} className="self-center" />
+			<label className="grid gap-1 text-xs font-bold text-muted-foreground">
 				Name
-				<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required maxLength={40} lang="ja" />
+				<Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required maxLength={40} lang="ja" autoFocus />
 			</label>
-			<label>
+			<label className="col-span-2 grid gap-1 text-xs font-bold text-muted-foreground sm:col-span-1">
 				Role
-				<input value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value })} maxLength={200} lang="ja" placeholder="Bug Reproduction" />
+				<Input value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value })} maxLength={200} lang="ja" placeholder="Bug Reproduction" />
 			</label>
-			<div className="icon-field">
-				<span className="icon-label">Icon</span>
-				{isImage(draft.avatar) ? (
-					<span className="icon-picked">
-						Image set
-						<button type="button" className="link" onClick={() => setDraft({ ...draft, avatar: "" })}>
-							Remove
-						</button>
-					</span>
-				) : (
-					<input aria-label="Icon" value={draft.avatar} onChange={(event) => setDraft({ ...draft, avatar: event.target.value })} placeholder="🐞 or https://…" />
-				)}
-				<label className="ghost small upload">
-					Upload image
-					<input
-						type="file"
-						accept="image/png,image/jpeg,image/webp,image/gif"
-						onChange={async (event) => {
-							const file = event.target.files?.[0];
-							event.target.value = "";
-							if (!file) return;
+			<div className="col-span-2 grid gap-1 text-xs font-bold text-muted-foreground sm:col-span-1">
+				<span>Icon</span>
+				<div className="flex items-center gap-2">
+					{isImage(draft.avatar) ? (
+						<span className="flex flex-1 items-center gap-2 font-normal text-foreground">
+							Image set
+							<button type="button" className="text-primary underline underline-offset-3" onClick={() => setDraft({ ...draft, avatar: "" })}>
+								Remove
+							</button>
+						</span>
+					) : (
+						<Input aria-label="Icon" value={draft.avatar} onChange={(event) => setDraft({ ...draft, avatar: event.target.value })} placeholder="🐞 or https://…" />
+					)}
+					<UploadButton
+						label="Upload"
+						onFile={async (file) => {
 							const avatar = await shrinkImage(file).catch(() => null);
 							if (avatar) setDraft({ ...draft, avatar });
 							else notify({ text: "That image could not be read. Try a PNG, JPEG, WebP or GIF.", tone: "error" });
 						}}
 					/>
-				</label>
+				</div>
 			</div>
-			<div className="palette" role="radiogroup" aria-label="Color">
+			<div className="col-span-full flex flex-wrap gap-1.5 sm:col-start-2" role="radiogroup" aria-label="Color">
 				{PALETTE.map((color) => (
 					<button
 						key={color}
 						type="button"
 						role="radio"
 						aria-checked={draft.color === color}
-						className={draft.color === color ? "swatch on" : "swatch"}
+						aria-label={color}
+						className={cn("size-6 rounded-full border-2 border-transparent", draft.color === color && "border-foreground")}
 						style={{ background: color }}
 						onClick={() => setDraft({ ...draft, color })}
 					/>
 				))}
 			</div>
-			<div className="row">
-				<button type="submit" className="primary small">
+			<div className="col-span-full flex gap-2 sm:col-start-2">
+				<Button type="submit" size="sm">
 					Save
-				</button>
-				<button type="button" className="ghost small" onClick={onCancel}>
+				</Button>
+				<Button type="button" variant="ghost" size="sm" onClick={onCancel}>
 					Cancel
-				</button>
+				</Button>
 			</div>
 		</form>
+	);
+}
+
+/** A button that opens the file picker; the hidden input stays out of the tab order. */
+function UploadButton({ label, onFile }: { label: string; onFile: (file: File) => void }) {
+	const input = useRef<HTMLInputElement>(null);
+	return (
+		<>
+			<Button type="button" variant="outline" size="sm" onClick={() => input.current?.click()}>
+				<UploadIcon />
+				{label}
+			</Button>
+			<input
+				ref={input}
+				type="file"
+				hidden
+				accept="image/png,image/jpeg,image/webp,image/gif"
+				onChange={(event) => {
+					const file = event.target.files?.[0];
+					event.target.value = "";
+					if (file) onFile(file);
+				}}
+			/>
+		</>
 	);
 }
 
 function CopyBlock({ text }: { text: string }) {
 	const [copied, setCopied] = useState(false);
 	return (
-		<div className="copy-block">
-			<pre lang="ja">{text}</pre>
-			<button
+		<div className="relative mt-2">
+			<pre className="m-0 rounded-lg border bg-background py-3 pr-24 pl-3 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap" lang="ja">
+				{text}
+			</pre>
+			<Button
 				type="button"
-				className="ghost small"
+				variant="outline"
+				size="xs"
+				className="absolute top-2 right-2"
 				onClick={async () => {
 					try {
 						await navigator.clipboard.writeText(text);
@@ -324,8 +365,9 @@ function CopyBlock({ text }: { text: string }) {
 					}
 				}}
 			>
+				{copied ? <CheckIcon /> : <CopyIcon />}
 				{copied ? "Copied" : "Copy"}
-			</button>
+			</Button>
 		</div>
 	);
 }

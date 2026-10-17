@@ -18,17 +18,24 @@ export async function signIn(page: Page) {
 	await page.goto("/login");
 	await page.fill("input[name=password]", OWNER_PASSWORD);
 	await page.click("button[type=submit]");
-	await page.waitForSelector(".card");
+	await page.waitForSelector("[data-card-id]");
 	// The board is server-rendered; wait for React to take over before clicking.
 	await page.waitForFunction(() => {
-		const card = document.querySelector(".card");
+		const card = document.querySelector("[data-card-id]");
 		return card !== null && Object.keys(card).some((key) => key.startsWith("__reactFiber"));
 	});
+	// Effects such as the keyboard shortcuts attach once the page has finished loading its code.
+	await page.waitForLoadState("networkidle");
 }
 
 export const unique = () => Math.random().toString(36).slice(2, 8);
-export const cardTitled = (page: Page, title: string) => page.locator(".card", { hasText: title });
-export const columnOf = (page: Page, title: string) => page.locator(".column", { has: cardTitled(page, title) });
+export const cardTitled = (page: Page, title: string) => page.locator("[data-card-id]", { hasText: title });
+export const columnOf = (page: Page, title: string) => page.locator("section[data-column]", { has: cardTitled(page, title) });
+/** Opens a card in the side drawer by clicking its title. */
+export const openCard = (page: Page, title: string) => cardTitled(page, title).getByRole("heading", { name: title }).click();
+/** The card drawer or dialog that is open now; one that just closed may still be animating out. */
+export const drawer = (page: Page) => page.locator('[data-slot="card-drawer"][data-state="open"]');
+export const runStatus = (page: Page, title: string) => cardTitled(page, title).locator('[data-slot="run-status"]');
 
 /**
  * Checks that a floating element is fully inside the window and is what the pointer hits at every row, so
@@ -45,7 +52,7 @@ export async function expectFullyVisible(popup: Locator) {
 		}
 		for (let y = Math.max(box.top, 0) + 2; y < Math.min(box.bottom, window.innerHeight) - 1; y += 6) {
 			const hit = document.elementFromPoint(box.left + box.width / 2, y);
-			if (!hit || !element.contains(hit)) found.push(`${Math.round(y)}px is covered by ${hit?.className || hit?.tagName || "nothing"}`);
+			if (!hit || !element.contains(hit)) found.push(`${Math.round(y)}px is covered by ${hit?.getAttribute("class") || hit?.tagName || "nothing"}`);
 		}
 		let opacity = 1;
 		for (let node: Element | null = element; node; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);

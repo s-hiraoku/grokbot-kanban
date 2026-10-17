@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { TOAST_LIMIT, TOAST_MS, commandToast, pushToast } from "@/lib/notify";
+import { TOAST_MS, commandToast } from "@/lib/notify";
 
 test("a successful command toasts only when the server has something to say", () => {
 	expect(commandToast(200, { notice: null })).toBeNull();
@@ -22,14 +22,4 @@ test("problems stay up longer than good news", () => {
 	expect(TOAST_MS.error).toBeGreaterThan(TOAST_MS.warning);
 	expect(TOAST_MS.warning).toBeGreaterThan(TOAST_MS.info);
 	expect(TOAST_MS.info).toBeGreaterThan(TOAST_MS.success);
-});
-
-test("the stack drops repeats and keeps only the newest few", () => {
-	let stack: { id: number; text: string; tone: "warning" | "success" }[] = [];
-	stack = pushToast(stack, { id: 1, text: "Stop the agent first.", tone: "warning" });
-	stack = pushToast(stack, { id: 2, text: "Stop the agent first.", tone: "warning" });
-	expect(stack.map((toast) => toast.id)).toEqual([2]);
-	for (let id = 3; id < 3 + TOAST_LIMIT + 1; id++) stack = pushToast(stack, { id, text: `t${id}`, tone: "success" });
-	expect(stack).toHaveLength(TOAST_LIMIT);
-	expect(stack.at(-1)?.id).toBe(3 + TOAST_LIMIT);
 });

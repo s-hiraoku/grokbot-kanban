@@ -1,3 +1,8 @@
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage({
@@ -8,18 +13,42 @@ export default async function LoginPage({
 	const params = await searchParams;
 	const failed = params.error === "1";
 	return (
-		<main className="login">
-			<form className="login-card" method="post" action="/api/auth/login">
-				<p className="login-brand">Grok Bot</p>
-				<h1>Sign in to the board</h1>
-				<p className="muted">This board is for the studio owner.</p>
-				<label>
-					Password
-					<input name="password" type="password" autoComplete="current-password" required />
-				</label>
-				{failed ? <p className="error">That password did not match.</p> : null}
-				<button type="submit" className="primary">Sign in</button>
-			</form>
+		<main className="grid min-h-dvh place-items-center p-4">
+			<Card className="w-full max-w-[380px] gap-5 bg-deck">
+				<CardHeader>
+					<p className="font-display text-[22px] font-bold">Grok Bot</p>
+					<CardTitle className="text-base font-normal text-muted-foreground">
+						<h1>Sign in to the board</h1>
+					</CardTitle>
+					<CardDescription>This board is for the studio owner.</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<form className="grid gap-4" method="post" action="/api/auth/login">
+						<div className="grid gap-2">
+							<Label htmlFor="password">Password</Label>
+							<Input
+								id="password"
+								name="password"
+								type="password"
+								autoComplete="current-password"
+								required
+								autoFocus
+								aria-invalid={failed || undefined}
+								aria-describedby={failed ? "password-error" : undefined}
+								className="bg-background dark:bg-background"
+							/>
+							{failed ? (
+								<p id="password-error" role="alert" className="text-[13px] text-destructive">
+									That password did not match. Try again.
+								</p>
+							) : null}
+						</div>
+						<Button type="submit" size="lg">
+							Sign in
+						</Button>
+					</form>
+				</CardContent>
+			</Card>
 		</main>
 	);
 }

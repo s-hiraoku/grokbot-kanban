@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cardTitled, openMenu, columnOf, expectFullyVisible, signIn, tool, unique } from "./helpers";
+import { cardTitled, columnOf, expectFullyVisible, openMenu, runStatus, signIn, tool, unique } from "./helpers";
 
 test("Run on a card with a Bot assignee starts the run at once, with no menu", async ({ page, request }) => {
 	const title = `assigned ${unique()}`;
@@ -8,7 +8,7 @@ test("Run on a card with a Bot assignee starts the run at once, with no menu", a
 
 	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
 	await expect(openMenu(page)).toHaveCount(0);
-	await expect(cardTitled(page, title).locator(".pill-text")).toHaveText("Run requested");
+	await expect(runStatus(page, title)).toHaveText("Run requested");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Progress/);
 	const queue = await tool(request, "list_run_requests", { bot: "Ops" });
 	expect(queue.cards.map((card: { title: string }) => card.title)).toContain(title);
@@ -25,7 +25,7 @@ test("Run on a card with no Bot assignee asks which Bot, drawn above the cards b
 	await cardTitled(page, title).getByRole("button", { name: "Run" }).click();
 	await expectFullyVisible(openMenu(page));
 	await page.getByRole("menuitem", { name: "Scout" }).click();
-	await expect(cardTitled(page, title).locator(".pill-text")).toHaveText("Run requested");
+	await expect(runStatus(page, title)).toHaveText("Run requested");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Progress/);
 });
 
