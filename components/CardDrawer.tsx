@@ -209,7 +209,7 @@ export default function CardDrawer({
 							{card ? (
 								<StatusMenu column={card.column} onMove={(to) => void send({ type: "move", cardId: card.id, to })} />
 							) : (
-								<span data-column="inbox" className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] px-3 font-display text-[13px] font-semibold">
+								<span data-column="inbox" className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] px-3 font-display text-[13px] font-semibold">
 									<Lamp />
 									New card for Inbox
 								</span>
@@ -259,7 +259,7 @@ export default function CardDrawer({
 											onEnter={() => panel.current?.requestSubmit()}
 											className={cn(
 												"-ml-2 min-h-0 border-transparent bg-transparent px-2 py-1 font-bold shadow-none break-words hover:border-border focus-visible:bg-background dark:bg-transparent",
-												wide ? "text-[22px] leading-[1.45] md:text-[28px] md:leading-[1.4]" : "text-[22px] leading-[1.45] md:text-[22px]",
+												wide ? "text-[19px] leading-[1.45] md:text-[23px] md:leading-[1.4]" : "text-[19px] leading-[1.45]",
 											)}
 										/>
 									</label>
@@ -328,10 +328,10 @@ export default function CardDrawer({
 											placeholder="What the bot reported, steps, context"
 											autoFocus={Boolean(card)}
 											aria-label="Details"
-											className={cn("bg-background px-3.5 py-3 text-[15px] leading-[1.8] dark:bg-background", wide ? "min-h-[420px]" : "min-h-[260px]")}
+											className={cn("bg-background px-3.5 py-3 text-[13.5px] leading-[1.8] dark:bg-background", wide ? "min-h-[420px]" : "min-h-[260px]")}
 										/>
 									) : (
-										<div className={cn("prose-card cursor-text", wide ? "min-h-[420px] md:max-w-[72ch] md:text-base" : "min-h-[260px]")} lang="ja" onDoubleClick={() => setEditingBody(true)}>
+										<div className={cn("prose-card cursor-text", wide ? "min-h-[420px] md:max-w-[72ch] md:text-[14.5px]" : "min-h-[260px]")} lang="ja" onDoubleClick={() => setEditingBody(true)}>
 											<Prose text={body} />
 										</div>
 									)}
@@ -545,7 +545,7 @@ function TextBlock({ title, action, children }: { title: string; action: ReactNo
 	return (
 		<section className="grid gap-2.5" aria-label={title}>
 			<div className="flex min-h-7 items-center justify-between gap-2 border-b pb-1.5">
-				<h3 className="font-display text-xs font-bold tracking-wider text-muted-foreground uppercase">{title}</h3>
+				<h3 className="text-[13px] font-bold text-foreground">{title}</h3>
 				{action}
 			</div>
 			{children}
@@ -563,7 +563,7 @@ function StatusMenu({ column, onMove }: { column: Column; onMove: (to: Column) =
 				<button
 					type="button"
 					data-column={column}
-					className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] pr-2.5 pl-3 font-display text-[13px] font-semibold transition-colors hover:border-(--lamp) data-[state=open]:border-(--lamp)"
+					className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] pr-2.5 pl-3 font-display text-[13px] font-semibold transition-colors hover:border-(--lamp) data-[state=open]:border-(--lamp)"
 					aria-label={`Status: ${label}. Move to another column`}
 				>
 					<Lamp />

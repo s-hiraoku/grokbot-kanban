@@ -264,3 +264,17 @@ export function ageLabel(createdAt: number, now: number): string {
 	if (hr < 48) return `${hr}h`;
 	return `${Math.floor(hr / 24)}d`;
 }
+
+/**
+ * The details as one run of plain text, for the two-line preview on a card. Markdown marks and blank lines
+ * are dropped, so the preview starts with words instead of `##` or an empty line.
+ */
+export function excerpt(markdown: string): string {
+	return markdown
+		.replace(/```[\s\S]*?(```|$)/g, " ")
+		.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+		.replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "")
+		.replace(/(\*\*|__|`|~~)/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
