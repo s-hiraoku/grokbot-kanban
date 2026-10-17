@@ -5,6 +5,7 @@ import {
 	COLUMNS,
 	OWNER_MEMBER,
 	RUNNABLE,
+	runnerOf,
 	columnOf,
 	moved,
 	nextRank,
@@ -491,7 +492,7 @@ async function requestRun(deps: BoardDeps, cardId: CardId, botId: string | null)
 	const card = await deps.store.get(cardId);
 	if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
 	const roster = await rosterOf(deps.store);
-	const bot = botId ? roster.find((item) => item.id === botId) : roster.find((item) => card.content.assignees.includes(item.id));
+	const bot = botId ? roster.find((item) => item.id === botId) : runnerOf(card.content.assignees, roster);
 	if (!bot) throw new BoardInputError(botId ? "That bot is not on the roster." : "Assign a Grok Bot to this card first, then run it.");
 	const current = card.state.botRun;
 	if (!current && !RUNNABLE.includes(card.state.column)) throw new BoardInputError("Run works on cards in Inbox, Todo, or In Progress. Move the card back to Todo to run it again.");

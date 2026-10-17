@@ -71,6 +71,18 @@ export type PastRun = {
  */
 export const RUNNABLE: readonly Column[] = ["inbox", "todo", "inProgress"];
 
+/**
+ * The Bot that Run hands a card to without asking: the first Bot among the card's assignees, in assignee
+ * order. null means nobody on the card is a Bot, so Run asks which one to use.
+ */
+export function runnerOf<T extends { id: string }>(assignees: readonly string[], bots: readonly T[]): T | null {
+	for (const id of assignees) {
+		const bot = bots.find((item) => item.id === id);
+		if (bot) return bot;
+	}
+	return null;
+}
+
 export type BotRun = {
 	bot: MemberId;
 	status: "requested" | "working";
