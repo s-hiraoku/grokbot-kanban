@@ -109,7 +109,13 @@ export function RunControl({
 						</button>
 					}
 				>
-					<MenuNote>{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</MenuNote>
+					<MenuNote>
+						{run.status === "working"
+							? `${run.bot.name} is on it.`
+							: run.passedOn
+								? `${run.passedOn.by.name} passed it on to ${run.bot.name} ${run.passedOn.since === "just now" ? "just now" : `${run.passedOn.since} ago`}. Waiting for ${run.bot.name} to start.`
+								: `${run.bot.name} has not picked it up yet.`}
+					</MenuNote>
 					{stop}
 				</Menu>
 			</span>

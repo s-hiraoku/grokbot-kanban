@@ -21,8 +21,10 @@ test("states written for Cursor runs read back in the column they showed in", ()
 	expect(() => readState({ kind: "mystery" })).toThrow();
 });
 
-test("a stored Bot run reads back, and a malformed one is dropped", () => {
-	const botRun = { bot: "ops", status: "working", requestedAt: 1, startedAt: 2 };
+test("a stored Bot run reads back, one stored before pass_run reads as not passed on, and a malformed one is dropped", () => {
+	const botRun = { bot: "ops", status: "working", requestedAt: 1, startedAt: 2, passedOn: { by: "kanban", at: 1 } };
 	expect(readState({ kind: "idle", column: "inProgress", last: null, botRun }).botRun).toEqual(botRun);
+	const before = { bot: "ops", status: "requested", requestedAt: 1, startedAt: null };
+	expect(readState({ kind: "idle", column: "inProgress", last: null, botRun: before }).botRun).toEqual({ ...before, passedOn: null });
 	expect(readState({ kind: "idle", column: "todo", last: null, botRun: { bot: "ops" } }).botRun).toBeNull();
 });
