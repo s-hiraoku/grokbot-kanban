@@ -27,6 +27,7 @@ import BotsPanel from "@/components/BotsPanel";
 import CardDrawer from "@/components/CardDrawer";
 import CardPanel, { type CardHandlers } from "@/components/CardPanel";
 import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
+import { ThemeMenu } from "@/components/ThemeMenu";
 import Toasts, { showToast } from "@/components/Toasts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -441,13 +442,13 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 				)}
 			>
 				<header className="sticky top-0 z-10 flex flex-wrap items-center gap-2.5 border-b bg-deck-2 px-4 py-2.5 [grid-area:top] md:static md:flex-nowrap md:gap-3.5 md:px-5 md:py-3">
-					<div className="flex flex-none items-center gap-1.5 md:w-[86px]">
+					<div className="flex flex-none items-center gap-1.5">
 						{studioUrl ? (
 							<a className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" href={studioUrl} aria-label="Back to the studio">
 								<ChevronLeftIcon className="size-5" />
 							</a>
 						) : null}
-						<h1 className="font-display text-[19px] font-bold whitespace-nowrap">Grok Bot</h1>
+						<h1 className="text-[15px] font-bold tracking-tight whitespace-nowrap">Grok Bot Kanban</h1>
 					</div>
 					<label className="relative order-3 flex basis-full items-center md:order-none md:max-w-[420px] md:flex-1 md:basis-auto">
 						<span className="sr-only">Search cards</span>
@@ -487,6 +488,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						<PlusIcon />
 						New card
 					</Button>
+					<ThemeMenu />
 				</header>
 
 				<nav
@@ -637,7 +639,7 @@ function DockMember({ member, load, active, onClick, droppable }: { member: Memb
 	const title = bot ? [bot.name, bot.role, bot.lastSeen === null ? "Not seen yet" : bot.lastSeen === "just now" ? "Seen just now" : `Last seen ${bot.lastSeen} ago`].filter(Boolean).join("\n") : "You";
 	return (
 		<DockButton ref={setNodeRef} active={active} over={isOver} waiting={droppable} onClick={onClick} title={title} load={load} label={member.name} color={member.color}>
-			<MemberAvatar member={member} size={40} />
+			<MemberAvatar member={member} size={32} />
 		</DockButton>
 	);
 }
@@ -677,13 +679,13 @@ function DockButton({
 					aria-label={`${label}, ${load} ${load === 1 ? "card" : "cards"}`}
 					style={{ "--member": color ?? "var(--primary)" } as React.CSSProperties}
 					className={cn(
-						"group/dock relative grid w-[72px] flex-none cursor-pointer justify-items-center gap-1 rounded-xl border border-transparent px-1 pt-2 pb-1.5 text-foreground transition-colors hover:bg-deck md:w-auto md:min-w-0",
+						"group/dock relative grid w-[72px] flex-none cursor-pointer justify-items-center gap-1 rounded-md border border-transparent px-1 pt-2 pb-1.5 text-foreground transition-colors hover:bg-deck md:w-auto md:min-w-0",
 						(active || over) && "border-(--member) bg-deck",
 					)}
 				>
 					<span
 						className={cn(
-							"grid size-11 place-items-center rounded-full transition-[box-shadow,transform] duration-150 [&>*]:shadow-[0_0_0_2px_var(--deck-2)]",
+							"grid size-9 place-items-center rounded-full transition-[box-shadow,transform] duration-150 [&>*]:shadow-[0_0_0_2px_var(--deck-2)]",
 							active && "[&>*]:shadow-[0_0_0_2px_var(--deck-2),0_0_0_4px_var(--member)]",
 							waiting && !active && "[&>*]:shadow-[0_0_0_2px_var(--deck-2),0_0_0_4px_var(--line)]",
 							over && "scale-110 [&>*]:shadow-[0_0_0_2px_var(--deck-2),0_0_0_4px_var(--member),0_0_22px_var(--member)]",
@@ -732,18 +734,17 @@ function ColumnShell({
 			data-column={id}
 			aria-label={label}
 			className={cn(
-				"flex min-h-0 flex-col rounded-2xl border bg-deck-2 transition-colors [--surface:var(--deck-2)]",
+				"flex min-h-0 flex-col rounded-b-md border border-t-[3px] border-t-(--lamp) bg-deck-2 transition-colors [--surface:var(--deck-2)]",
 				"max-h-[calc(100dvh-220px)] flex-[0_0_calc(100vw-48px)] snap-start md:max-h-none md:max-w-[360px] md:min-w-[232px] md:flex-[1_1_232px]",
 				folded && "max-w-[52px] min-w-[52px] flex-[0_0_52px] md:max-w-[52px] md:min-w-[52px] md:flex-[0_0_52px]",
 				canDrop && "border-line",
-				canDrop && isOver && "border-primary bg-[#1f2848]",
+				canDrop && isOver && "border-primary border-t-(--lamp) bg-drop",
 			)}
 		>
-			<header className={cn("flex h-12 flex-none items-center gap-2 pr-2 pl-4 select-none", folded && "h-auto flex-col gap-2.5 px-0 py-3")}>
+			<header className={cn("flex h-10 flex-none items-center gap-2 pr-1.5 pl-3 select-none", folded && "h-auto flex-col gap-2.5 px-0 py-3")}>
 				{onFold && folded ? <FoldButton label={label} folded onClick={onFold} /> : null}
-				<span aria-hidden="true" className={cn("size-2 flex-none rounded-full bg-(--lamp)", id === "inProgress" && "shadow-[0_0_8px_var(--lamp)]")} />
-				<h2 className={cn("font-display text-[15px] font-semibold tracking-[0.01em] whitespace-nowrap", folded && "text-sm [writing-mode:vertical-rl]")}>{label}</h2>
-				<span className="font-display text-[13px] font-semibold text-muted-foreground">{count}</span>
+				<h2 className={cn("text-[13px] font-bold whitespace-nowrap", folded && "text-sm [writing-mode:vertical-rl]")}>{label}</h2>
+				<span className="text-xs font-medium text-muted-foreground tabular-nums">{count}</span>
 				{onAdd || (onFold && !folded) ? (
 					<span className="ml-auto flex items-center">
 						{onAdd ? (
@@ -760,7 +761,7 @@ function ColumnShell({
 					</span>
 				) : null}
 			</header>
-			<div className={cn("flex min-h-[60px] flex-1 flex-col gap-2.5 overflow-y-auto px-2.5 pt-0.5 pb-2.5", folded && "min-h-0 p-0")}>{children}</div>
+			<div className={cn("flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto px-2 pt-0.5 pb-2", folded && "min-h-0 p-0")}>{children}</div>
 		</section>
 	);
 }
@@ -768,12 +769,12 @@ function ColumnShell({
 /** One active filter, such as Search "ログ", with an × that removes just that filter. */
 function FilterChip({ label, value, onClear }: { label: string; value: string; onClear: () => void }) {
 	return (
-		<span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-line bg-secondary pr-1 pl-3 text-[13px]">
+		<span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-line bg-secondary pr-1 pl-2.5 text-xs">
 			<span className="text-muted-foreground">{label}</span>
 			<span className="max-w-[16rem] truncate font-bold" lang="ja">
 				{value}
 			</span>
-			<button type="button" className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-line hover:text-foreground" aria-label={`Remove the ${label.toLowerCase()} filter`} onClick={onClear}>
+			<button type="button" className="grid size-5 place-items-center rounded-sm text-muted-foreground hover:bg-line hover:text-foreground" aria-label={`Remove the ${label.toLowerCase()} filter`} onClick={onClear}>
 				<XIcon className="size-3" />
 			</button>
 		</span>

@@ -13,11 +13,11 @@ import type { CardView, MemberView } from "@/lib/view";
 type Size = "card" | "drawer";
 
 const SHAPE: Record<Size, string> = {
-	card: "h-6 gap-1.5 px-2.5 text-xs [&_svg]:size-3",
+	card: "h-6 gap-1 px-2 text-xs [&_svg]:size-3",
 	drawer: "h-8 gap-2 px-2.5 text-[13px] [&_svg]:size-3.5",
 };
-const TEAL = "border-teal-line bg-teal-soft text-teal hover:border-teal data-[state=open]:border-teal";
-const AMBER = "border-[#6b5520] bg-amber-soft text-primary hover:border-primary data-[state=open]:border-primary";
+const TEAL = "border-teal-line bg-transparent text-teal-text hover:bg-teal-soft data-[state=open]:bg-teal-soft";
+const AMBER = "border-amber-line bg-amber-soft text-primary hover:border-primary data-[state=open]:border-primary";
 
 /**
  * Run on a card, in the board and in the drawer. With a Bot among the assignees, Run starts it straight
@@ -45,7 +45,7 @@ export function RunControl({
 		await send(command);
 		setBusy(false);
 	};
-	const pill = cn("inline-flex flex-none items-center rounded-full border font-bold whitespace-nowrap transition-colors disabled:opacity-60", SHAPE[size]);
+	const pill = cn("inline-flex flex-none items-center rounded-md border font-semibold whitespace-nowrap transition-colors disabled:opacity-60", SHAPE[size]);
 	const stop = (
 		<MenuItem danger onSelect={() => void act({ type: "stop", cardId: card.id })}>
 			<XIcon />
@@ -154,7 +154,7 @@ export function RunControl({
 	if (runner) {
 		// A split button: Run goes straight to the assigned Bot; the arrow picks someone else.
 		return (
-			<span className={cn("inline-flex flex-none rounded-full border", TEAL.split(" ")[0])} data-no-dnd>
+			<span className={cn("inline-flex flex-none rounded-md border", TEAL.split(" ")[0])} data-no-dnd>
 				<button
 					type="button"
 					className={cn(pill, TEAL, "rounded-r-none border-0 pr-2")}

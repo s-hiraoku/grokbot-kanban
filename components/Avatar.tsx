@@ -15,7 +15,7 @@ export function MemberAvatar({ member, size = 22, ring = false, className }: { m
 	return (
 		<span
 			className={cn(
-				"relative inline-grid flex-none place-items-center rounded-full leading-none font-bold text-[#10142a] select-none",
+				"relative inline-grid flex-none place-items-center rounded-full leading-none font-bold text-avatar-text select-none",
 				member.kind === "owner" && !isImage && "border-[1.5px] border-primary tracking-tight text-primary",
 				ring && "shadow-[0_0_0_2px_var(--surface)]",
 				className,

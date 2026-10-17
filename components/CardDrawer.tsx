@@ -151,7 +151,7 @@ export default function CardDrawer({
 				<DialogPrimitive.Overlay
 					className={cn(
 						"fixed inset-0 z-40 data-[state=closed]:pointer-events-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
-						wide ? "bg-[#0a0e1cb8]" : "bg-[#0a0e1c80]",
+						wide ? "bg-scrim-strong" : "bg-scrim",
 					)}
 				/>
 				<DialogPrimitive.Content
@@ -209,7 +209,7 @@ export default function CardDrawer({
 							{card ? (
 								<StatusMenu column={card.column} onMove={(to) => void send({ type: "move", cardId: card.id, to })} />
 							) : (
-								<span data-column="inbox" className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] px-3 font-display text-[13px] font-semibold">
+								<span data-column="inbox" className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] px-3 font-display text-[13px] font-semibold">
 									<Lamp />
 									New card for Inbox
 								</span>
@@ -259,7 +259,7 @@ export default function CardDrawer({
 											onEnter={() => panel.current?.requestSubmit()}
 											className={cn(
 												"-ml-2 min-h-0 border-transparent bg-transparent px-2 py-1 font-bold shadow-none break-words hover:border-border focus-visible:bg-background dark:bg-transparent",
-												wide ? "text-[22px] leading-[1.45] md:text-[28px] md:leading-[1.4]" : "text-[22px] leading-[1.45] md:text-[22px]",
+												wide ? "text-[19px] leading-[1.45] md:text-[23px] md:leading-[1.4]" : "text-[19px] leading-[1.45]",
 											)}
 										/>
 									</label>
@@ -276,7 +276,7 @@ export default function CardDrawer({
 									<p
 										className={cn(
 											"flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-[13px] leading-relaxed",
-											card.run.status === "working" ? "bg-teal-soft text-[#b5f3e3]" : "bg-amber-soft text-[#f6d48f]",
+											card.run.status === "working" ? "bg-teal-soft text-teal-text" : "bg-amber-soft text-amber-text",
 										)}
 										role="status"
 									>
@@ -292,7 +292,7 @@ export default function CardDrawer({
 									<p
 										className={cn(
 											"flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-[13px] leading-relaxed",
-											card.cursor.status === "running" ? "bg-teal-soft text-[#b5f3e3]" : "bg-amber-soft text-[#f6d48f]",
+											card.cursor.status === "running" ? "bg-teal-soft text-teal-text" : "bg-amber-soft text-amber-text",
 										)}
 										role="status"
 									>
@@ -328,10 +328,10 @@ export default function CardDrawer({
 											placeholder="What the bot reported, steps, context"
 											autoFocus={Boolean(card)}
 											aria-label="Details"
-											className={cn("bg-background px-3.5 py-3 text-[15px] leading-[1.8] dark:bg-background", wide ? "min-h-[420px]" : "min-h-[260px]")}
+											className={cn("bg-background px-3.5 py-3 text-[13.5px] leading-[1.8] dark:bg-background", wide ? "min-h-[420px]" : "min-h-[260px]")}
 										/>
 									) : (
-										<div className={cn("prose-card cursor-text", wide ? "min-h-[420px] md:max-w-[72ch] md:text-base" : "min-h-[260px]")} lang="ja" onDoubleClick={() => setEditingBody(true)}>
+										<div className={cn("prose-card cursor-text", wide ? "min-h-[420px] md:max-w-[72ch] md:text-[14.5px]" : "min-h-[260px]")} lang="ja" onDoubleClick={() => setEditingBody(true)}>
 											<Prose text={body} />
 										</div>
 									)}
@@ -380,7 +380,7 @@ export default function CardDrawer({
 											<ToggleGroupItem
 												key={item.id}
 												value={item.id}
-												className={cn("px-3.5 data-[state=on]:font-bold", item.id === "high" && "data-[state=on]:bg-danger-soft data-[state=on]:text-[#ffd2ca]")}
+												className={cn("px-3.5 data-[state=on]:font-bold", item.id === "high" && "data-[state=on]:bg-danger-soft data-[state=on]:text-danger-text")}
 											>
 												{item.label}
 											</ToggleGroupItem>
@@ -545,7 +545,7 @@ function TextBlock({ title, action, children }: { title: string; action: ReactNo
 	return (
 		<section className="grid gap-2.5" aria-label={title}>
 			<div className="flex min-h-7 items-center justify-between gap-2 border-b pb-1.5">
-				<h3 className="font-display text-xs font-bold tracking-wider text-muted-foreground uppercase">{title}</h3>
+				<h3 className="text-[13px] font-bold text-foreground">{title}</h3>
 				{action}
 			</div>
 			{children}
@@ -563,7 +563,7 @@ function StatusMenu({ column, onMove }: { column: Column; onMove: (to: Column) =
 				<button
 					type="button"
 					data-column={column}
-					className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] pr-2.5 pl-3 font-display text-[13px] font-semibold transition-colors hover:border-(--lamp) data-[state=open]:border-(--lamp)"
+					className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-[color-mix(in_srgb,var(--lamp)_12%,transparent)] pr-2.5 pl-3 font-display text-[13px] font-semibold transition-colors hover:border-(--lamp) data-[state=open]:border-(--lamp)"
 					aria-label={`Status: ${label}. Move to another column`}
 				>
 					<Lamp />
@@ -707,7 +707,7 @@ function NotesLog({ notes }: { notes: string }) {
 							<time className="font-display text-faint">{entry.stamp}</time>
 						</p>
 					) : null}
-					<p className="text-[13px] leading-[1.7] break-words text-[#cfd4ea] [&_a]:text-link">
+					<p className="text-[13px] leading-[1.7] break-words text-soft-text [&_a]:text-link">
 						{entry.lines.map((line, at) => (
 							<Fragment key={at}>
 								{at > 0 ? <br /> : null}

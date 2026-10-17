@@ -22,8 +22,8 @@ export default function Toasts() {
 					title: "break-words",
 					success: "!border-l-teal [&_[data-icon]]:!text-teal",
 					info: "!border-l-muted-foreground",
-					warning: "!border-[#7a5d1f] !border-l-primary !bg-amber-soft !text-[#ffe7b3] [&_[data-icon]]:!text-primary",
-					error: "!border-[#6e3340] !border-l-destructive !bg-danger-soft !text-[#ffd8d1] [&_[data-icon]]:!text-destructive",
+					warning: "!border-amber-line !border-l-primary !bg-amber-soft !text-amber-text [&_[data-icon]]:!text-primary",
+					error: "!border-danger-line !border-l-destructive !bg-danger-soft !text-danger-text [&_[data-icon]]:!text-destructive",
 					closeButton: "!left-auto !right-0 !top-0 !translate-x-1/3 !-translate-y-1/3 !border-line !bg-popover !text-foreground",
 				},
 			}}

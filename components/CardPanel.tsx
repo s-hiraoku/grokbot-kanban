@@ -7,7 +7,7 @@ import { AvatarStack, MemberAvatar, UnknownAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
 import { RunControl } from "@/components/RunControl";
 import { cn } from "@/lib/utils";
-import type { CardView, MemberView } from "@/lib/view";
+import { excerpt, type CardView, type MemberView } from "@/lib/view";
 
 export type CardHandlers = {
 	/** Reads the card in the side drawer. */
@@ -40,6 +40,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 	const lead = card.assignees[0] ?? null;
 	// Low priority fades the card's text only, so the card's own menus stay solid.
 	const faded = card.priority === "low" ? "opacity-80" : undefined;
+	const preview = excerpt(card.body);
 
 	return (
 		<article
@@ -47,13 +48,13 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 			data-card-id={card.id}
 			data-priority={card.priority}
 			className={cn(
-				"group/card relative cursor-pointer touch-manipulation rounded-xl border border-line/70 bg-card py-3 pr-3 pl-[18px] shadow-[0_1px_2px_#0006] transition-colors outline-none select-none [--surface:var(--card)] [-webkit-touch-callout:none]",
-				"before:absolute before:inset-y-3 before:left-[7px] before:w-[3px] before:rounded-full before:bg-(--stripe)",
+				"group/card relative cursor-pointer touch-manipulation rounded-md border border-line/70 bg-card py-2.5 pr-2.5 pl-4 transition-colors outline-none select-none [--surface:var(--card)] [-webkit-touch-callout:none]",
+				"before:absolute before:inset-y-2.5 before:left-[6px] before:w-[3px] before:rounded-full before:bg-(--stripe)",
 				!lead && "before:w-0 before:border-l-2 before:border-dashed before:border-line before:bg-transparent",
-				"hover:border-[#46538a] hover:bg-accent focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/40",
+				"hover:border-card-hover-line focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/40",
 				card.run?.status === "working" && "border-teal-line",
 				dragging && "border-dashed opacity-30",
-				overlay && "cursor-grabbing border-primary shadow-[0_18px_40px_#0009] transition-[transform,opacity] duration-150",
+				overlay && "cursor-grabbing border-primary shadow-[0_18px_40px_var(--shadow)] transition-[transform,opacity] duration-150",
 				overlay && toMember && "origin-top-left scale-50 opacity-85",
 				highlighted && "border-primary ring-[3px] ring-primary/25",
 				className,
@@ -69,26 +70,26 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 			{...rest}
 		>
 			<div className="flex items-start gap-1.5">
-				<h3 className={cn("min-w-0 flex-1 text-[15px] leading-[1.55] font-bold break-words", faded)} lang="ja">
+				<h3 className={cn("min-w-0 flex-1 text-[13.5px] leading-normal font-bold break-words", faded)} lang="ja">
 					{card.title || "Untitled"}
 				</h3>
 				{overlay ? null : <CardMenu card={card} handlers={handlers} />}
 			</div>
-			{card.body ? (
-				<p className={cn("mt-1.5 line-clamp-2 text-[13.5px] leading-[1.7] whitespace-pre-wrap text-soft-text", faded)} lang="ja">
-					{card.body}
+			{preview ? (
+				<p className={cn("mt-1 line-clamp-2 text-xs leading-[1.65] break-words text-soft-text", faded)} lang="ja">
+					{preview}
 				</p>
 			) : null}
 			<div className="mt-2.5 flex flex-wrap items-center gap-1.5 empty:hidden">
 				<span className={cn("contents", overlay && "pointer-events-none")}>
 					<RunControl card={card} bots={handlers.bots} cursorEnabled={handlers.cursorEnabled} size="card" send={handlers.send} />
 				</span>
-				{card.priority === "high" ? <Tag className="bg-danger-soft font-bold text-[#ffd2ca]">High</Tag> : null}
+				{card.priority === "high" ? <Tag className="bg-danger-soft font-bold text-danger-text">High</Tag> : null}
 				{card.priority === "low" ? <Tag className={cn("border bg-transparent text-muted-foreground", faded)}>Low</Tag> : null}
 				{card.repoLabel ? <Tag className={faded}>{card.repoLabel}</Tag> : null}
 				{card.kind.type === "voice" ? <Tag className={faded}>Voice {card.kind.seconds}s</Tag> : null}
 				{card.source ? <Tag className={faded}>{card.source}</Tag> : null}
-				{card.screened ? <Tag className={cn("bg-[#1f3a2e] text-[#c8f2d0]", faded)}>Screened</Tag> : null}
+				{card.screened ? <Tag className={cn("bg-ok-soft text-ok-text", faded)}>Screened</Tag> : null}
 			</div>
 			<footer className={cn("mt-3 flex min-h-6 items-center gap-2 border-t border-line/50 pt-2.5", faded)}>
 				<span className="mr-auto inline-flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground" title={card.createdBy ? `Filed by ${card.createdBy.name}` : "Filed over the API"}>

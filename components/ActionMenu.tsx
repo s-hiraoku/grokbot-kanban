@@ -45,7 +45,7 @@ export function MenuItem({ danger, current, className, ...props }: ComponentProp
 }
 
 export function MenuTitle({ children }: { children: ReactNode }) {
-	return <DropdownMenuLabel className="pt-1 pb-1 text-[11px] font-bold tracking-wider text-faint uppercase">{children}</DropdownMenuLabel>;
+	return <DropdownMenuLabel className="pt-1 pb-1 text-xs font-semibold text-muted-foreground">{children}</DropdownMenuLabel>;
 }
 
 export function MenuSeparator() {
