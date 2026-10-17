@@ -1,6 +1,6 @@
 # grokbot-kanban
 
-A dark kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, annotate, and move cards over MCP or HTTP. Only you delete cards.
+A kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, annotate, and move cards over MCP or HTTP. Only you delete cards.
 
 The board is meant to be served at `kanban.hiraoku.dev`. This repo does not deploy itself.
 
@@ -26,10 +26,11 @@ The interface is built with Tailwind CSS and [shadcn/ui](https://ui.shadcn.com) 
 | `OWNER_PASSWORD` | yes | Sign-in password, at least 32 characters. It also signs the session cookie. |
 | `BOT_TOKEN` | yes | Bearer token for `/api/bot/cards`, at least 32 characters. |
 | `STUDIO_URL` | no | `https` target of the Studio link. |
+| `CURSOR_API_KEY` | no | Cursor API key, from Cursor Dashboard → Integrations. With it, Run can hand cards to a Cursor cloud agent. |
 
-Generate both secrets with `openssl rand -base64 32`. They must differ from each other.
+Generate both secrets with `openssl rand -base64 32`. They must differ from each other and from `CURSOR_API_KEY`.
 
-Earlier versions also needed `CURSOR_API_KEY` and `CRON_SECRET`, for Cursor agent runs. The board no longer launches agents, so both can be removed from the Vercel project.
+`CRON_SECRET` from earlier versions is no longer used and can be removed from the Vercel project.
 
 ## Deploy on Vercel
 
@@ -59,6 +60,14 @@ Each card shows the bot that filed it, a stripe in the color of the first assign
 
 **Run** sits on every card in Inbox and Todo, and next to the status button in the drawer. When the card has a Bot assignee, Run starts at once with the first one. With no Bot assigned, Run opens a menu to pick one; the bot is added to the assignees, the card moves straight to In Progress, and it shows *Run requested*. A card in In Progress with no run going (cancelled mid-work, or moved there by hand) shows **Re-run** instead. In Review, Done, and Won't Do cards have no Run; move one back to Todo to run it again. Grok Bot has no API that starts a Bot from outside, so the Bot picks the request up itself: its **Kanban Run** routine calls `list_run_requests` every 5 minutes, then `start_run` (the card shows *Running*), does the work, leaves progress in the notes, and ends with `finish_run`. The outcome decides the column: `done` → Done, `review` → In Review, `blocked` → back to Todo. Every step is signed into the notes. While a run is waiting or working, clicking its badge (or the drawer's Run menu) offers **Cancel run**: a request no Bot has picked up goes back to Todo, and work already under way stays in In Progress. A Bot that calls `finish_run` after a cancel is told the run is gone. Set up the routine once per Bot with the message under **Bots & MCP → Connect Grok Bot**.
 
+### Hand a card to a Cursor agent
+
+When a card needs code written, Run can give it to a [Cursor cloud agent](https://cursor.com/docs/cloud-agent/api/endpoints) instead of a Grok Bot. Set the card's repo and branch under **More fields** first. Then pick **Cursor agent** under *Write code* in the Run menu: the arrow beside Run when a Bot is assigned, or Run itself when none is. The board sends Cursor the card's title, details, and notes, and asks for a pull request (`POST /v1/agents` with `autoCreatePR`). The card moves to In Progress and shows *Cursor working*; its badge and the drawer link to the agent in Cursor and offer **Cancel run**. A Grok Bot working on a card can do the same with the MCP tool `hand_off_to_cursor`, adding what it found as instructions; that ends the Bot's own run, and the card shows who handed it over.
+
+While someone has the board open, it asks Cursor how each run is going at most every 20 seconds (`GET /v1/agents/{id}/runs/{runId}`), so a card can lag a run by that much plus the 15-second refresh. A finished run moves the card to In Review with its pull request on the card; a failed, expired, or cancelled run sends it back to Todo, with Cursor's agent link in the notes. A card someone moved by hand while Cursor worked stays where they put it. If Cursor refuses the launch (for example, it cannot reach the repository), the card goes back where it was and Cursor's reason shows in a toast and in the notes. If Cursor does not answer at all, the card waits two minutes and then lets go, with a note to check Cursor before running again, since an agent may have started.
+
+Without `CURSOR_API_KEY`, the Cursor entry in the Run menu stays off and says how to turn it on.
+
 `/?card=<id>` scrolls to a card and highlights it. MCP results carry this link so a bot's report can point at the card.
 
 ## Grok Bot over MCP
@@ -83,6 +92,7 @@ Because the connector is shared, the board cannot tell Bots apart by token. Ever
 | `move_card` | yes | Move to any column with a reason signed into the notes |
 | `start_run` | yes | Take a run request; the card moves to In Progress |
 | `finish_run` | yes | End the run with `done`, `review`, or `blocked` and a summary |
+| `hand_off_to_cursor` | yes | Give a card that needs code to a Cursor agent, with instructions; ends the caller's run |
 | `update_my_profile` | yes | Name, role, icon, color |
 
 Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask.
@@ -123,4 +133,6 @@ Card text, including text from a bot, is stored and shown as data. The panel ren
 
 Do not commit real tokens. `.env.example` has empty placeholders. The repository is public.
 
-Cards keep their earlier Cursor run in the stored state, so an old card still links to its agent and pull request. Cards that were queued or running when agents were removed show in Todo or In Progress and move like any other card. The `slot` column from that time stays in the schema and is always empty now.
+`CURSOR_API_KEY` stays on the server; neither the browser nor the bot token can read it. A Bot can hand a card to Cursor only for a card it is running or one that has no run, and Cursor works only on repositories its key can reach. Card text goes to Cursor as the agent's task, so treat a hand-off like giving the card to a colleague with access to that repository.
+
+Cards keep their last Cursor run in the stored state, so a card still links to its agent and pull request. Cards that were queued or running when agents were removed show in Todo or In Progress and move like any other card. The `slot` column from that time stays in the schema and is always empty now.

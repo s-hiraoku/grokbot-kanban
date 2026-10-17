@@ -1,13 +1,14 @@
 "use client";
 
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon, Maximize2Icon, Minimize2Icon, MoreHorizontalIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon, Maximize2Icon, Minimize2Icon, MoreHorizontalIcon, SquareTerminalIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { Fragment, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
-import { Menu, MenuItem, MenuNote, MenuTitle } from "@/components/ActionMenu";
+import { Menu, MenuItem, MenuTitle } from "@/components/ActionMenu";
 import AssigneePicker from "@/components/AssigneePicker";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
 import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
+import { RunControl } from "@/components/RunControl";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -19,7 +20,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { COLUMNS, RUNNABLE, runnerOf, type Column } from "@/lib/domain";
+import { COLUMNS, type Column } from "@/lib/domain";
 import type { ToastMessage } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import type { CardView, MemberView } from "@/lib/view";
@@ -40,6 +41,7 @@ export default function CardDrawer({
 	card,
 	dialog = false,
 	members,
+	cursorEnabled = false,
 	send,
 	notify,
 	onSubmit,
@@ -51,6 +53,8 @@ export default function CardDrawer({
 	/** Opens as the large centered dialog instead of the side drawer, with the details ready to edit. */
 	dialog?: boolean;
 	members: readonly MemberView[];
+	/** Whether Run can hand the card to a Cursor agent. */
+	cursorEnabled?: boolean;
 	send: (command: Command) => Promise<boolean>;
 	notify: (message: ToastMessage) => void;
 	onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
@@ -210,7 +214,7 @@ export default function CardDrawer({
 									New card for Inbox
 								</span>
 							)}
-							{card ? <RunMenu card={card} members={members} send={send} /> : null}
+							{card ? <RunControl card={card} bots={members.filter((member) => member.kind === "bot")} cursorEnabled={cursorEnabled} size="drawer" send={send} /> : null}
 							{card ? <span className="font-display text-xs text-faint">#{card.shortId}</span> : null}
 							<span className="ml-auto inline-flex items-center gap-0.5">
 								<IconButton label={wide ? "Show as side panel" : "Open in a large view"} aria-pressed={wide} onClick={() => setWide((current) => !current)} className="max-md:hidden">
@@ -281,6 +285,27 @@ export default function CardDrawer({
 											{card.run.status === "working"
 												? `${card.run.bot.name} is working on this card (started ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). Its report lands in Notes.`
 												: `Waiting for ${card.run.bot.name} to pick this up (asked ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). The Bot checks on its routine.`}
+										</span>
+									</p>
+								) : null}
+								{card?.cursor ? (
+									<p
+										className={cn(
+											"flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-[13px] leading-relaxed",
+											card.cursor.status === "running" ? "bg-teal-soft text-[#b5f3e3]" : "bg-amber-soft text-[#f6d48f]",
+										)}
+										role="status"
+									>
+										<SquareTerminalIcon className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+										<span>
+											{card.cursor.status === "running"
+												? `A Cursor agent is working on ${card.repoLabel ?? "the repository"} (started ${card.cursor.since === "just now" ? "just now" : `${card.cursor.since} ago`} by ${card.cursor.by.name}). The card moves to In Review when its pull request is ready.`
+												: "Handed to Cursor. Waiting for Cursor to confirm the agent."}{" "}
+											{card.cursor.agentUrl ? (
+												<a href={card.cursor.agentUrl} target="_blank" rel="noreferrer" className="font-bold text-inherit underline">
+													Open in Cursor
+												</a>
+											) : null}
 										</span>
 									</p>
 								) : null}
@@ -384,7 +409,7 @@ export default function CardDrawer({
 											{card.links.agent ? (
 												<li>
 													<a href={card.links.agent} target="_blank" rel="noreferrer">
-														Past Cursor agent
+														{card.cursor ? "Cursor agent" : "Last Cursor agent"}
 													</a>
 												</li>
 											) : null}
@@ -525,86 +550,6 @@ function TextBlock({ title, action, children }: { title: string; action: ReactNo
 			</div>
 			{children}
 		</section>
-	);
-}
-
-/**
- * Run hands the card to a Grok Bot. A Bot already on the card runs it straight away; otherwise the menu
- * asks which one. A pending or working run shows here with Cancel run.
- */
-function RunMenu({ card, members, send }: { card: CardView; members: readonly MemberView[]; send: (command: Command) => Promise<boolean> }) {
-	const [busy, setBusy] = useState(false);
-	const bots = members.filter((member) => member.kind === "bot");
-	const run = card.run;
-	if (!run && !RUNNABLE.includes(card.column)) return null;
-	const verb = card.column === "inProgress" ? "Re-run" : "Run";
-	const runner = runnerOf(
-		card.assignees.map((member) => member.id),
-		bots,
-	);
-	const act = async (command: Command) => {
-		if (busy) return;
-		setBusy(true);
-		await send(command);
-		setBusy(false);
-	};
-	const chip = "inline-flex h-8 items-center gap-2 rounded-full border px-2.5 text-[13px] font-bold transition-colors disabled:opacity-60";
-	const play = busy ? <Spinner className="size-3.5" /> : <PlayIcon className="size-3 fill-current" />;
-
-	if (!run && runner) {
-		return (
-			<button
-				type="button"
-				className={cn(chip, "border-teal-line bg-teal-soft text-teal hover:border-teal")}
-				title={`${verb} with ${runner.name}`}
-				disabled={busy}
-				onClick={() => void act({ type: "run", cardId: card.id, bot: runner.id })}
-			>
-				{play}
-				{verb}
-			</button>
-		);
-	}
-	return (
-		<Menu
-			align="start"
-			trigger={
-				<button
-					type="button"
-					disabled={busy}
-					className={cn(
-						chip,
-						run?.status === "requested" ? "border-[#6b5520] bg-amber-soft text-primary hover:border-primary" : "border-teal-line bg-teal-soft text-teal hover:border-teal data-[state=open]:border-teal",
-					)}
-					aria-label={run ? `Run: ${run.status === "working" ? `${run.bot.name} working` : `waiting for ${run.bot.name}`}` : `${verb} with a Grok Bot`}
-				>
-					{run ? <MemberAvatar member={run.bot} size={18} /> : play}
-					<span>{run ? (run.status === "working" ? "Running" : "Requested") : verb}</span>
-					<ChevronDownIcon className="size-3.5" />
-				</button>
-			}
-		>
-			{run ? (
-				<>
-					<MenuNote>{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</MenuNote>
-					<MenuItem danger onSelect={() => void act({ type: "stop", cardId: card.id })}>
-						<XIcon />
-						Cancel run
-					</MenuItem>
-				</>
-			) : (
-				<>
-					<MenuTitle>{verb} with</MenuTitle>
-					{bots.length === 0 ? <MenuNote>No bots yet. Connect one under Bots & MCP.</MenuNote> : null}
-					{bots.map((bot) => (
-						<MenuItem key={bot.id} onSelect={() => void act({ type: "run", cardId: card.id, bot: bot.id })}>
-							<MemberAvatar member={bot} size={20} />
-							<span lang="ja">{bot.name}</span>
-						</MenuItem>
-					))}
-				</>
-			)}
-		</Menu>
 	);
 }
 

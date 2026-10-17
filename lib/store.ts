@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { BotProfile, BotProfilePatch } from "./bots";
-import type { BotRun, Card, CardContent, CardId, CardState, Column, ContentPatch, HttpsUrl, Instant, MemberId, PastRun } from "./domain";
+import type { BotRun, Card, CardContent, CardId, CardState, Column, ContentPatch, CursorRun, HttpsUrl, Instant, MemberId, PastRun } from "./domain";
 import { bots, cards } from "./schema";
 
 type QueryDb = {
@@ -94,6 +94,15 @@ const botRunSchema = z.object({
 	requestedAt: z.number(),
 	startedAt: z.number().nullable(),
 });
+const cursorRunSchema = z.object({
+	launchId: z.string(),
+	status: z.enum(["launching", "running"]),
+	agent: z.object({ agentId: z.string(), runId: z.string(), url: z.string() }).nullable(),
+	by: z.string(),
+	from: columnSchema,
+	startedAt: z.number(),
+	checkedAt: z.number(),
+});
 // Earlier versions also stored queued, starting, running, stopping, and review states for Cursor runs.
 // Those cards read back in the column they showed in, keeping the links of a run that ended.
 const storedState = z
@@ -103,6 +112,7 @@ const storedState = z
 		last: z.unknown().optional(),
 		run: z.unknown().optional(),
 		botRun: z.unknown().optional(),
+		cursorRun: z.unknown().optional(),
 	})
 	.passthrough();
 const LEGACY_COLUMN: Record<string, Column> = {
@@ -119,7 +129,14 @@ export function readState(raw: unknown): CardState {
 	if (!column) throw new Error(`unknown card state ${stored.kind}`);
 	const run = pastRun.safeParse(stored.kind === "review" ? stored.run : stored.last);
 	const botRun = botRunSchema.safeParse(stored.botRun);
-	return { kind: "idle", column, last: run.success ? (run.data as PastRun) : null, botRun: botRun.success ? (botRun.data as BotRun) : null };
+	const cursorRun = cursorRunSchema.safeParse(stored.cursorRun);
+	return {
+		kind: "idle",
+		column,
+		last: run.success ? (run.data as PastRun) : null,
+		botRun: botRun.success ? (botRun.data as BotRun) : null,
+		cursorRun: cursorRun.success ? (cursorRun.data as CursorRun) : null,
+	};
 }
 
 const contentSchema = z.object({
@@ -138,7 +155,7 @@ const contentSchema = z.object({
 	assignees: z.array(z.string()),
 });
 
-const idleInbox: CardState = { kind: "idle", column: "inbox", last: null, botRun: null };
+const idleInbox: CardState = { kind: "idle", column: "inbox", last: null, botRun: null, cursorRun: null };
 
 export function createStore(db: QueryDb): Store {
 	return {

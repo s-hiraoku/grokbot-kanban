@@ -1,11 +1,11 @@
 "use client";
 
-import { ChevronDownIcon, EllipsisVerticalIcon, PencilIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react";
-import { forwardRef, useState, type HTMLAttributes } from "react";
-import { Menu, MenuItem, MenuNote, MenuTitle } from "@/components/ActionMenu";
+import { EllipsisVerticalIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { forwardRef, type HTMLAttributes } from "react";
+import { Menu, MenuItem } from "@/components/ActionMenu";
 import { AvatarStack, MemberAvatar, UnknownAvatar } from "@/components/Avatar";
-import { Spinner } from "@/components/ui/spinner";
-import { RUNNABLE, runnerOf } from "@/lib/domain";
+import type { Command } from "@/components/Board";
+import { RunControl } from "@/components/RunControl";
 import { cn } from "@/lib/utils";
 import type { CardView, MemberView } from "@/lib/view";
 
@@ -16,10 +16,10 @@ export type CardHandlers = {
 	onEdit: () => void;
 	/** Asks to delete the card; the board confirms first. */
 	onDelete: () => void;
-	/** Asks a Grok Bot to carry out the card. Resolves once the board has answered. */
-	onRun: (botId: string) => Promise<boolean>;
-	onStopRun: () => Promise<boolean>;
+	/** Sends Run, Cursor, and Cancel run for the card. Resolves once the board has answered. */
+	send: (command: Command) => Promise<boolean>;
 	bots: readonly MemberView[];
+	cursorEnabled: boolean;
 };
 
 type Props = {
@@ -47,10 +47,10 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 			data-card-id={card.id}
 			data-priority={card.priority}
 			className={cn(
-				"group/card relative cursor-pointer touch-manipulation rounded-xl border bg-card py-2.5 pr-3 pl-[15px] transition-colors outline-none select-none [--surface:var(--card)] [-webkit-touch-callout:none]",
-				"before:absolute before:inset-y-2.5 before:left-[5px] before:w-[3px] before:rounded-full before:bg-(--stripe)",
+				"group/card relative cursor-pointer touch-manipulation rounded-xl border border-line/70 bg-card py-3 pr-3 pl-[18px] shadow-[0_1px_2px_#0006] transition-colors outline-none select-none [--surface:var(--card)] [-webkit-touch-callout:none]",
+				"before:absolute before:inset-y-3 before:left-[7px] before:w-[3px] before:rounded-full before:bg-(--stripe)",
 				!lead && "before:w-0 before:border-l-2 before:border-dashed before:border-line before:bg-transparent",
-				"hover:border-line hover:bg-accent focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/40",
+				"hover:border-[#46538a] hover:bg-accent focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/40",
 				card.run?.status === "working" && "border-teal-line",
 				dragging && "border-dashed opacity-30",
 				overlay && "cursor-grabbing border-primary shadow-[0_18px_40px_#0009] transition-[transform,opacity] duration-150",
@@ -69,18 +69,20 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 			{...rest}
 		>
 			<div className="flex items-start gap-1.5">
-				<h3 className={cn("min-w-0 flex-1 text-sm leading-[1.45] font-bold break-words", faded)} lang="ja">
+				<h3 className={cn("min-w-0 flex-1 text-[15px] leading-[1.55] font-bold break-words", faded)} lang="ja">
 					{card.title || "Untitled"}
 				</h3>
 				{overlay ? null : <CardMenu card={card} handlers={handlers} />}
 			</div>
 			{card.body ? (
-				<p className={cn("mt-1 line-clamp-2 text-[13px] leading-[1.55] whitespace-pre-wrap text-soft-text", faded)} lang="ja">
+				<p className={cn("mt-1.5 line-clamp-2 text-[13.5px] leading-[1.7] whitespace-pre-wrap text-soft-text", faded)} lang="ja">
 					{card.body}
 				</p>
 			) : null}
-			<div className="mt-2 flex flex-wrap items-center gap-1 empty:hidden">
-				{overlay ? card.run ? <RunPill run={card.run} /> : null : <CardRun card={card} handlers={handlers} />}
+			<div className="mt-2.5 flex flex-wrap items-center gap-1.5 empty:hidden">
+				<span className={cn("contents", overlay && "pointer-events-none")}>
+					<RunControl card={card} bots={handlers.bots} cursorEnabled={handlers.cursorEnabled} size="card" send={handlers.send} />
+				</span>
 				{card.priority === "high" ? <Tag className="bg-danger-soft font-bold text-[#ffd2ca]">High</Tag> : null}
 				{card.priority === "low" ? <Tag className={cn("border bg-transparent text-muted-foreground", faded)}>Low</Tag> : null}
 				{card.repoLabel ? <Tag className={faded}>{card.repoLabel}</Tag> : null}
@@ -88,10 +90,10 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				{card.source ? <Tag className={faded}>{card.source}</Tag> : null}
 				{card.screened ? <Tag className={cn("bg-[#1f3a2e] text-[#c8f2d0]", faded)}>Screened</Tag> : null}
 			</div>
-			<footer className={cn("mt-2.5 flex min-h-6 items-center gap-2", faded)}>
+			<footer className={cn("mt-3 flex min-h-6 items-center gap-2 border-t border-line/50 pt-2.5", faded)}>
 				<span className="mr-auto inline-flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground" title={card.createdBy ? `Filed by ${card.createdBy.name}` : "Filed over the API"}>
 					{card.createdBy ? <MemberAvatar member={card.createdBy} size={18} /> : <UnknownAvatar size={18} />}
-					<time className="whitespace-nowrap text-faint">{card.age}</time>
+					<time className="whitespace-nowrap">{card.age}</time>
 				</span>
 				{card.links.pr ? (
 					<a className="rounded-md bg-secondary px-1.5 py-px text-xs font-bold text-link no-underline hover:bg-line" href={card.links.pr} target="_blank" rel="noreferrer" data-no-dnd>
@@ -103,7 +105,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 						<AvatarStack members={card.assignees} size={22} max={3} />
 					</span>
 				) : (
-					<span className="truncate text-[11px] text-faint">Unassigned</span>
+					<span className="truncate text-xs text-muted-foreground">Unassigned</span>
 				)}
 			</footer>
 		</article>
@@ -113,109 +115,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 export default CardPanel;
 
 function Tag({ className, children }: { className?: string; children: React.ReactNode }) {
-	return <span className={cn("max-w-full truncate rounded-md bg-secondary px-[7px] py-px text-[11px] text-soft-text", className)}>{children}</span>;
-}
-
-export function RunPill({ run }: { run: NonNullable<CardView["run"]> }) {
-	const text = run.status === "working" ? `${run.bot.name} working` : `Waiting for ${run.bot.name}`;
-	return (
-		<span
-			className={cn(
-				"inline-flex flex-none items-center gap-1.5 rounded-full py-0.5 pr-2 pl-1 text-[11px] font-bold whitespace-nowrap",
-				run.status === "working" ? "bg-teal-soft text-teal" : "bg-amber-soft text-primary",
-			)}
-			title={`${text}, ${run.since === "just now" ? "just now" : `${run.since} ago`}`}
-		>
-			{run.status === "working" ? <span className="size-[7px] animate-pulse-dot rounded-full bg-teal" aria-hidden="true" /> : null}
-			<MemberAvatar member={run.bot} size={14} />
-			<span data-slot="run-status" lang="ja">
-				{run.status === "working" ? "Running" : "Run requested"}
-			</span>
-		</span>
-	);
-}
-
-const runButton =
-	"inline-flex h-6 items-center gap-1.5 rounded-full border border-teal-line px-2.5 text-xs font-bold text-teal transition-colors hover:border-teal hover:bg-teal-soft data-[state=open]:border-teal data-[state=open]:bg-teal-soft disabled:opacity-60 [&_svg]:size-3";
-
-/**
- * Run on the card. With a Bot among the assignees it runs straight away; with none it asks which Bot to
- * use. While a run is waiting or working, the badge opens a menu to cancel it.
- */
-function CardRun({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
-	const [busy, setBusy] = useState(false);
-	const run = card.run;
-	if (!run && !RUNNABLE.includes(card.column)) return null;
-	const label = card.column === "inProgress" ? "Re-run" : "Run";
-	const runner = runnerOf(
-		card.assignees.map((member) => member.id),
-		handlers.bots,
-	);
-	// One request at a time, so a double click does not queue the card twice.
-	const act = async (work: () => Promise<boolean>) => {
-		if (busy) return;
-		setBusy(true);
-		await work();
-		setBusy(false);
-	};
-
-	if (run) {
-		return (
-			<span data-no-dnd>
-				<Menu
-					align="start"
-					trigger={
-						<button
-							type="button"
-							className="rounded-full hover:shadow-[0_0_0_1px_currentColor] data-[state=open]:shadow-[0_0_0_1px_currentColor]"
-							aria-label={run.status === "working" ? `${run.bot.name} is running this card` : `Waiting for ${run.bot.name}`}
-						>
-							<RunPill run={run} />
-						</button>
-					}
-				>
-					<MenuNote>{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</MenuNote>
-					<MenuItem danger onSelect={() => void act(handlers.onStopRun)}>
-						<XIcon />
-						Cancel run
-					</MenuItem>
-				</Menu>
-			</span>
-		);
-	}
-	if (runner) {
-		return (
-			<span data-no-dnd>
-				<button type="button" className={runButton} title={`${label} with ${runner.name}`} disabled={busy} onClick={() => void act(() => handlers.onRun(runner.id))}>
-					{busy ? <Spinner /> : <PlayIcon className="fill-current" />}
-					{label}
-				</button>
-			</span>
-		);
-	}
-	return (
-		<span data-no-dnd>
-			<Menu
-				align="start"
-				trigger={
-					<button type="button" className={runButton} title={`${label} with a Grok Bot`} disabled={busy}>
-						{busy ? <Spinner /> : <PlayIcon className="fill-current" />}
-						{label}
-						<ChevronDownIcon />
-					</button>
-				}
-			>
-				<MenuTitle>{label} with</MenuTitle>
-				{handlers.bots.length === 0 ? <MenuNote>No bots yet. Connect one under Bots & MCP.</MenuNote> : null}
-				{handlers.bots.map((bot) => (
-					<MenuItem key={bot.id} onSelect={() => void act(() => handlers.onRun(bot.id))}>
-						<MemberAvatar member={bot} size={18} />
-						<span lang="ja">{bot.name}</span>
-					</MenuItem>
-				))}
-			</Menu>
-		</span>
-	);
+	return <span className={cn("max-w-full truncate rounded-md bg-secondary px-2 py-0.5 text-xs leading-4 text-soft-text", className)}>{children}</span>;
 }
 
 function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }) {

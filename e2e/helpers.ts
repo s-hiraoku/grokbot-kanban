@@ -69,3 +69,6 @@ export async function settled(locator: Locator) {
 
 /** The menu that is open now; one that just closed may still be fading out next to it. */
 export const openMenu = (page: Page) => page.locator('[role="menu"][data-state="open"]');
+
+/** The stand-in Cursor API the tests run against (e2e/fake-cursor.mjs). */
+export const FAKE_CURSOR = "http://localhost:3299";

@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { openBoard, type BoardHandle, type OwnerCommand } from "@/lib/board";
+import type { CursorClient } from "@/lib/cursor";
 import type { Instant } from "@/lib/domain";
 import { sessionCookie } from "@/lib/auth";
 import * as schema from "@/lib/schema";
@@ -20,7 +21,7 @@ export type TestApp = {
 	cookie: string;
 };
 
-export async function boot(): Promise<TestApp> {
+export async function boot(options: { cursor?: CursorClient } = {}): Promise<TestApp> {
 	const client = new PGlite();
 	await client.exec(migrationSql());
 	const db = drizzle(client, { schema });
@@ -28,12 +29,15 @@ export async function boot(): Promise<TestApp> {
 	const board = openBoard({
 		store: createStore(db as never),
 		now: () => now as Instant,
+		cursor: options.cursor ?? null,
 	});
 	const env: Env = {
 		databaseUrl: "postgres://test",
 		ownerPassword: PASSWORD,
 		botToken: BOT_TOKEN,
 		studioUrl: null,
+		cursorApiKey: options.cursor ? "c".repeat(32) : null,
+		cursorApiUrl: null,
 	};
 	return {
 		board,

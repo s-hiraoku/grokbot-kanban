@@ -3,6 +3,7 @@ import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
 import { openBoard, type BoardHandle } from "./board";
+import { createCursorClient, type CursorClient } from "./cursor";
 import { migrationSql } from "./migrations";
 import { createStore } from "./store";
 import * as schema from "./schema";
@@ -12,6 +13,10 @@ export type Env = {
 	ownerPassword: string;
 	botToken: string;
 	studioUrl: string | null;
+	/** Optional. With it, Run can hand cards to a Cursor cloud agent. */
+	cursorApiKey: string | null;
+	/** Where the Cursor API lives. Only the browser tests change it, to point at a stand-in. */
+	cursorApiUrl: string | null;
 };
 
 const MIN_SECRET = 32;
@@ -26,8 +31,11 @@ export function env(source: NodeJS.ProcessEnv = process.env): Env {
 	if (ownerPassword === botToken) problems.push("OWNER_PASSWORD and BOT_TOKEN must differ");
 	const studio = source.STUDIO_URL?.trim() || null;
 	if (studio && !studio.startsWith("https://")) problems.push("STUDIO_URL must start with https://");
+	const cursorApiKey = source.CURSOR_API_KEY?.trim() || null;
+	if (cursorApiKey && (cursorApiKey === ownerPassword || cursorApiKey === botToken)) problems.push("CURSOR_API_KEY must differ from OWNER_PASSWORD and BOT_TOKEN");
+	const cursorApiUrl = source.CURSOR_API_URL?.trim() || null;
 	if (problems.length) throw new Error(problems.join("; "));
-	return { databaseUrl, ownerPassword, botToken, studioUrl: studio };
+	return { databaseUrl, ownerPassword, botToken, studioUrl: studio, cursorApiKey, cursorApiUrl };
 }
 
 function required(source: NodeJS.ProcessEnv, name: string): string {
@@ -42,8 +50,9 @@ const cache = ((globalThis as { __grokbotKanban?: { board?: BoardHandle } }).__g
 export function getBoard(): BoardHandle {
 	if (cache.board) return cache.board;
 	const config = env();
+	const cursor = config.cursorApiKey ? createCursorClient({ apiKey: config.cursorApiKey, baseUrl: config.cursorApiUrl ?? undefined }) : null;
 	if (config.databaseUrl === "pglite") {
-		cache.board = lazyPgliteBoard();
+		cache.board = lazyPgliteBoard(cursor);
 		return cache.board;
 	}
 	const sql = neon(config.databaseUrl);
@@ -51,14 +60,15 @@ export function getBoard(): BoardHandle {
 	cache.board = openBoard({
 		store: createStore(db as never),
 		now: () => Date.now() as never,
+		cursor,
 	});
 	return cache.board;
 }
 
-function lazyPgliteBoard(): BoardHandle {
+function lazyPgliteBoard(cursor: CursorClient | null): BoardHandle {
 	let ready: Promise<BoardHandle> | null = null;
 	const open = () => {
-		ready ??= openLocalPglite();
+		ready ??= openLocalPglite(cursor);
 		return ready;
 	};
 	// Every capability view forwards each call to the real board once PGlite is ready.
@@ -76,12 +86,13 @@ function lazyPgliteBoard(): BoardHandle {
 	};
 }
 
-async function openLocalPglite(): Promise<BoardHandle> {
+async function openLocalPglite(cursor: CursorClient | null): Promise<BoardHandle> {
 	const client = new PGlite();
 	await client.exec(migrationSql());
 	const db = drizzlePglite(client, { schema });
 	return openBoard({
 		store: createStore(db as never),
 		now: () => Date.now() as never,
+		cursor,
 	});
 }

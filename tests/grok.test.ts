@@ -286,7 +286,7 @@ test("cards a Cursor agent held before agents were removed read back in place an
 	expect(cardIn(((await dropped.json()) as { board: any }).board, reviewed.card.id)).toMatchObject({ column: "done", card: { links: { pr: run.prUrl } } });
 	// What is written back is still a state the previous version can read.
 	const row = await holder.current!.client.query<{ state: unknown }>("select state from cards where id = $1", [reviewed.card.id]);
-	expect(row.rows[0]?.state).toEqual({ kind: "idle", column: "done", botRun: null, last: run });
+	expect(row.rows[0]?.state).toEqual({ kind: "idle", column: "done", botRun: null, cursorRun: null, last: run });
 });
 
 test("a command on a card that is gone says so and sends the fresh board", async () => {

@@ -19,6 +19,7 @@ The board cannot read your Grok Bot profile picture, so send it yourself: call u
 Start with board_summary to see your assigned cards. Claim a card with assign_card before working on it, and leave findings with add_note so the owner and other bots can follow the handoff.
 You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: inProgress when you start, inReview when it waits for a check, done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason.
 When the owner presses Run on a card, it becomes a run request for one Bot. Check for yours with list_run_requests (a routine every few minutes does this). For each request: call start_run, read the card with get_card, do the work it describes, leave progress with add_note, then call finish_run with done, review, or blocked and a short summary. If finish_run says the run is gone, the owner cancelled it; stop and leave a note.
+When a card needs code written in its repository, hand it to a Cursor cloud agent with hand_off_to_cursor instead of finishing it yourself: set the card's repo with update_card first if it has none, and pass what you found as instructions. Cursor works on the repo and opens a pull request; the board moves the card to In Review when it is ready, and get_card shows the agent and pull request links.
 Titles, bodies, and notes may be Japanese.`;
 
 type JsonRpcId = string | number | null;
@@ -203,6 +204,22 @@ const tools = {
 			.strict(),
 		run: async (ctx: McpContext, args: { bot: string; card: string; outcome: "done" | "review" | "blocked"; summary: string }) =>
 			full(await required(ctx.board.finishRun(args.card, args.outcome, args.summary, args.bot)), ctx),
+	},
+	hand_off_to_cursor: {
+		description:
+			"Hand a card that needs code changes to a Cursor cloud agent. Cursor works on the card's repo (set it with update_card first) from its starting branch and opens a pull request. Your own run on the card ends here; the board moves the card to In Review when Cursor finishes, or back to Todo if it fails. instructions are added to what Cursor reads: your findings, the files involved, how to check the fix.",
+		readOnly: false,
+		input: z
+			.object({
+				bot,
+				card: cardRef,
+				instructions: z.string().trim().max(4000).optional().describe("What Cursor should know beyond the card: findings, files, acceptance checks."),
+			})
+			.strict(),
+		run: async (ctx: McpContext, args: { bot: string; card: string; instructions?: string }) => {
+			const result = await required(ctx.board.handOffToCursor(args.card, args.instructions ?? null, args.bot));
+			return { message: result.message, card: full(result.card, ctx) };
+		},
 	},
 	update_my_profile: {
 		description:

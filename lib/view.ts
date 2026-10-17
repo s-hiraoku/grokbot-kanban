@@ -5,6 +5,8 @@ export type BoardView = {
 	columns: readonly ColumnView[];
 	bots: readonly BotView[];
 	owner: { avatar: string };
+	/** Whether Run can hand cards to a Cursor cloud agent (CURSOR_API_KEY is set). */
+	cursor: { enabled: boolean };
 };
 
 export type MemberView = {
@@ -55,6 +57,8 @@ export type CardView = {
 	links: { character: string | null; agent: string | null; pr: string | null };
 	/** The Grok Bot run this card waits on: requested until the bot picks it up, then working. */
 	run: { bot: MemberView; status: "requested" | "working"; since: string } | null;
+	/** The Cursor agent working on the card: launching until Cursor confirms it, then running. */
+	cursor: { status: "launching" | "running"; agentUrl: string | null; by: MemberView; since: string } | null;
 };
 
 export type BotCardView = {
@@ -76,9 +80,10 @@ export type BotCardView = {
 	agentUrl: string | null;
 	prUrl: string | null;
 	run: { bot: string; status: "requested" | "working"; requestedAt: string; startedAt: string | null } | null;
+	cursor: { status: "launching" | "running"; agentUrl: string | null; by: string; startedAt: string } | null;
 };
 
-export function toBoardView(cards: readonly Card[], bots: readonly BotProfile[], now: number): BoardView {
+export function toBoardView(cards: readonly Card[], bots: readonly BotProfile[], now: number, options: { cursorEnabled: boolean } = { cursorEnabled: false }): BoardView {
 	const columns = COLUMNS.map((column) => {
 		const inColumn = cards
 			.filter((card) => columnOf(card.state) === column.id)
@@ -95,6 +100,7 @@ export function toBoardView(cards: readonly Card[], bots: readonly BotProfile[],
 		columns,
 		bots: bots.filter((bot) => bot.id !== OWNER_MEMBER).map((bot) => toBotView(bot, cards, now)),
 		owner: { avatar: ownerAvatarUrl(bots) },
+		cursor: { enabled: options.cursorEnabled },
 	};
 }
 
@@ -179,6 +185,14 @@ export function toCardView(card: Card, bots: readonly BotProfile[], now: number)
 					since: ageLabel(card.state.botRun.startedAt ?? card.state.botRun.requestedAt, now),
 				}
 			: null,
+		cursor: card.state.cursorRun
+			? {
+					status: card.state.cursorRun.status,
+					agentUrl: card.state.cursorRun.agent?.url ?? null,
+					by: memberOf(card.state.cursorRun.by, bots),
+					since: ageLabel(card.state.cursorRun.startedAt, now),
+				}
+			: null,
 	};
 }
 
@@ -211,6 +225,14 @@ export function toBotCard(card: Card, bots: readonly BotProfile[]): BotCardView 
 					startedAt: card.state.botRun.startedAt === null ? null : new Date(card.state.botRun.startedAt).toISOString(),
 				}
 			: null,
+		cursor: card.state.cursorRun
+			? {
+					status: card.state.cursorRun.status,
+					agentUrl: card.state.cursorRun.agent?.url ?? null,
+					by: memberOf(card.state.cursorRun.by, bots).name,
+					startedAt: new Date(card.state.cursorRun.startedAt).toISOString(),
+				}
+			: null,
 	};
 }
 
@@ -235,7 +257,7 @@ function repoLabel(url: string | null): string | null {
 
 export function ageLabel(createdAt: number, now: number): string {
 	const sec = Math.max(0, Math.floor((now - createdAt) / 1000));
-	if (sec < 45) return "just now";
+	if (sec < 60) return "just now";
 	const min = Math.floor(sec / 60);
 	if (min < 60) return `${min}m`;
 	const hr = Math.floor(min / 60);
