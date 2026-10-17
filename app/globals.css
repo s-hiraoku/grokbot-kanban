@@ -447,7 +447,27 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 .filed { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; color: var(--muted); margin-right: auto; }
 .filed-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 96px; }
 .filed time { color: var(--faint); white-space: nowrap; }
-.owners.nobody { font-size: 11px; color: var(--faint); }
+.owners.nobody { font-size: 11px; color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-run { position: relative; flex: none; }
+.card-run-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 24px;
+	padding: 0 9px;
+	border: 1px solid #2a5a5a;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--teal);
+	font-size: 12px;
+	font-weight: 700;
+	cursor: pointer;
+}
+.card-run-button svg { width: 8px; height: 10px; fill: currentColor; }
+.card-run-button:hover, .card-run-button[aria-expanded="true"] { background: var(--teal-soft); border-color: var(--teal); }
+.run-trigger { border: 0; padding: 0; background: transparent; cursor: pointer; border-radius: 999px; }
+.run-trigger:hover .pill, .run-trigger[aria-expanded="true"] .pill { box-shadow: 0 0 0 1px currentColor; }
+.card-run .run-menu { left: 0; right: auto; top: 28px; min-width: 0; width: 200px; }
 .pr-link { font-size: 12px; font-weight: 700; text-decoration: none; padding: 1px 6px; border-radius: 6px; background: #26305a; color: #b9cbff; }
 /* Avatars */
 
@@ -631,6 +651,9 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	line-height: 1.8;
 }
 .notes-input { font-size: 13px; line-height: 1.7; }
+/* Details get room to read and write in, so a report is not squeezed into a few lines. */
+.text-block > .prose, .body-input { min-height: 260px; }
+.drawer.wide .text-block > .prose, .drawer.wide .body-input { min-height: 420px; }
 .body-input:focus, .notes-input:focus { border-color: var(--amber); outline: none; }
 .prose { font-size: 15px; line-height: 1.85; color: var(--text); overflow-wrap: anywhere; cursor: text; }
 .drawer.wide .prose { font-size: 16px; max-width: 72ch; }

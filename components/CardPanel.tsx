@@ -2,11 +2,16 @@
 
 import { forwardRef, useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { AvatarStack, MemberAvatar } from "@/components/Avatar";
-import type { CardView } from "@/lib/view";
+import { RUNNABLE } from "@/lib/domain";
+import type { CardView, MemberView } from "@/lib/view";
 
 export type CardHandlers = {
 	onOpen: () => void;
 	onDelete: () => void;
+	/** Asks a Grok Bot to carry out the card. */
+	onRun: (botId: string) => void;
+	onStopRun: () => void;
+	bots: readonly MemberView[];
 };
 
 type Props = {
@@ -63,7 +68,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				</p>
 			) : null}
 			<div className="tags">
-				{card.run ? <RunPill run={card.run} /> : null}
+				{overlay ? (card.run ? <RunPill run={card.run} /> : null) : <CardRun card={card} handlers={handlers} />}
 				{card.priority === "high" ? <span className="tag high">High</span> : null}
 				{card.priority === "low" ? <span className="tag low">Low</span> : null}
 				{card.repoLabel ? <span className="tag repo">{card.repoLabel}</span> : null}
@@ -108,7 +113,8 @@ export function RunPill({ run }: { run: NonNullable<CardView["run"]> }) {
 	);
 }
 
-function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
+/** A small menu on the card that closes on an outside press or Escape. */
+function usePopover() {
 	const [open, setOpen] = useState(false);
 	const box = useRef<HTMLDivElement>(null);
 	useEffect(() => {
@@ -126,6 +132,84 @@ function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }
 			document.removeEventListener("keydown", escape);
 		};
 	}, [open]);
+	return { open, setOpen, box };
+}
+
+/** Run on the card: pick a Grok Bot to carry it out, or see and cancel the run in progress. */
+function CardRun({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
+	const { open, setOpen, box } = usePopover();
+	const run = card.run;
+	const assigned = new Set(card.assignees.map((member) => member.id));
+	const bots = [...handlers.bots.filter((bot) => assigned.has(bot.id)), ...handlers.bots.filter((bot) => !assigned.has(bot.id))];
+	if (!run && !RUNNABLE.includes(card.column)) return null;
+	const label = card.column === "inProgress" ? "Re-run" : "Run";
+	return (
+		<div className="card-run" ref={box} data-no-dnd>
+			{run ? (
+				<button type="button" className="run-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+					<RunPill run={run} />
+				</button>
+			) : (
+				<button
+					type="button"
+					className="card-run-button"
+					aria-label={`${label} with a Grok Bot`}
+					aria-haspopup="menu"
+					aria-expanded={open}
+					onClick={() => setOpen((value) => !value)}
+				>
+					<svg viewBox="0 0 10 12" aria-hidden="true">
+						<path d="M1 1l8 5-8 5z" />
+					</svg>
+					{label}
+				</button>
+			)}
+			{open ? (
+				<div className="menu run-menu" role="menu">
+					{run ? (
+						<>
+							<p className="menu-note">{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</p>
+							<button
+								type="button"
+								role="menuitem"
+								className="danger-item"
+								onClick={() => {
+									setOpen(false);
+									handlers.onStopRun();
+								}}
+							>
+								Cancel run
+							</button>
+						</>
+					) : (
+						<>
+							<p className="menu-title">{label} with</p>
+							{bots.length === 0 ? <p className="menu-note">No bots yet. Connect one under Bots & MCP.</p> : null}
+							{bots.map((bot) => (
+								<button
+									key={bot.id}
+									type="button"
+									role="menuitem"
+									onClick={() => {
+										setOpen(false);
+										handlers.onRun(bot.id);
+									}}
+								>
+									<MemberAvatar member={bot} size={18} />
+									<span>{bot.name}</span>
+									{assigned.has(bot.id) ? <span className="menu-hint">assigned</span> : null}
+								</button>
+							))}
+						</>
+					)}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
+	const { open, setOpen, box } = usePopover();
 	return (
 		<div className="card-menu" ref={box} data-no-dnd>
 			<button

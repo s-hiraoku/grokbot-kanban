@@ -4,7 +4,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode,
 import AssigneePicker from "@/components/AssigneePicker";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
-import { COLUMNS, type Column } from "@/lib/domain";
+import { COLUMNS, RUNNABLE, type Column } from "@/lib/domain";
 import type { ToastMessage } from "@/lib/notify";
 import type { CardView, MemberView } from "@/lib/view";
 
@@ -13,8 +13,6 @@ const PRIORITIES = [
 	{ id: "normal", label: "Normal" },
 	{ id: "high", label: "High" },
 ] as const;
-
-const WIDE_KEY = "kanban.drawer.wide";
 
 /**
  * Opens beside the board to read, edit, and move one card, or to write a new one. The expand button
@@ -57,14 +55,6 @@ export default function CardDrawer({
 	const panel = useRef<HTMLFormElement>(null);
 
 	useEffect(() => {
-		try {
-			setWide(window.localStorage.getItem(WIDE_KEY) === "1");
-		} catch {
-			// Storage is off. The drawer opens narrow.
-		}
-	}, []);
-
-	useEffect(() => {
 		if (!card) first.current?.focus();
 		else panel.current?.focus();
 		const onKey = (event: KeyboardEvent) => {
@@ -77,15 +67,8 @@ export default function CardDrawer({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [onClose]);
 
-	const toggleWide = () =>
-		setWide((current) => {
-			try {
-				window.localStorage.setItem(WIDE_KEY, current ? "0" : "1");
-			} catch {
-				// Storage is off. The size holds until the drawer closes.
-			}
-			return !current;
-		});
+	// The large view lasts until the drawer closes; every card opens in the drawer again.
+	const toggleWide = () => setWide((current) => !current);
 
 	const content = () => ({
 		title: title.trim(),
@@ -260,7 +243,7 @@ export default function CardDrawer({
 								) : null}
 							</div>
 							{editingBody ? (
-								<GrowingText value={body} onChange={setBody} className="body-input" minRows={wide ? 10 : 6} placeholder="What the bot reported, steps, context" autoFocus={Boolean(card)} />
+								<GrowingText value={body} onChange={setBody} className="body-input" minRows={wide ? 18 : 12} placeholder="What the bot reported, steps, context" autoFocus={Boolean(card)} />
 							) : (
 								<div className="prose" lang="ja" onDoubleClick={() => setEditingBody(true)}>
 									<Prose text={body} />
@@ -407,15 +390,17 @@ function RunMenu({ card, members, send }: { card: CardView; members: readonly Me
 	const assigned = new Set(card.assignees.map((member) => member.id));
 	const ordered = [...bots.filter((bot) => assigned.has(bot.id)), ...bots.filter((bot) => !assigned.has(bot.id))];
 	const run = card.run;
+	if (!run && !RUNNABLE.includes(card.column)) return null;
+	const verb = card.column === "inProgress" ? "Re-run" : "Run";
 	return (
 		<Menu
-			label={run ? `Run: ${run.status === "working" ? `${run.bot.name} working` : `waiting for ${run.bot.name}`}` : "Run with a Grok Bot"}
+			label={run ? `Run: ${run.status === "working" ? `${run.bot.name} working` : `waiting for ${run.bot.name}`}` : `${verb} with a Grok Bot`}
 			className={`run-button${run ? ` ${run.status}` : ""}`}
 			align="left"
 			icon={
 				<>
 					{run ? <MemberAvatar member={run.bot} size={18} /> : <svg className="play" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" /></svg>}
-					<span>{run ? (run.status === "working" ? "Running" : "Requested") : "Run"}</span>
+					<span>{run ? (run.status === "working" ? "Running" : "Requested") : verb}</span>
 					<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
 						<path d="M1 1l4 4 4-4" />
 					</svg>
@@ -442,7 +427,7 @@ function RunMenu({ card, members, send }: { card: CardView; members: readonly Me
 					</>
 				) : (
 					<>
-						<p className="menu-title">Run with</p>
+						<p className="menu-title">{verb} with</p>
 						{ordered.length === 0 ? <p className="menu-note">No bots yet. Connect one under Bots & MCP.</p> : null}
 						{ordered.map((bot) => (
 							<button

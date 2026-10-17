@@ -65,6 +65,12 @@ export type PastRun = {
  * A Run the owner asked a Grok Bot to do. The board cannot wake a Bot, so the Bot finds requests on its
  * own schedule (a routine that calls list_run_requests), marks the run working, and reports back.
  */
+/**
+ * Columns a Bot run starts from. Pressing Run moves the card straight to In Progress; a card already
+ * there with no run going (cancelled, or moved by hand) offers Re-run instead.
+ */
+export const RUNNABLE: readonly Column[] = ["inbox", "todo", "inProgress"];
+
 export type BotRun = {
 	bot: MemberId;
 	status: "requested" | "working";

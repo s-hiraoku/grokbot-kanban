@@ -261,6 +261,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		onDelete: () => {
 			if (window.confirm(`Delete “${card.title}”? This cannot be undone.`)) void send({ type: "deleteCard", cardId: card.id });
 		},
+		onRun: (botId) => void send({ type: "run", cardId: card.id, bot: botId }),
+		onStopRun: () => void send({ type: "stop", cardId: card.id }),
+		bots: board.bots,
 	});
 
 	const needle = query.trim().toLowerCase();
