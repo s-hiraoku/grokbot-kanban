@@ -87,7 +87,8 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const notify = useCallback((message: ToastMessage) => setToasts((current) => pushToast(current, { ...message, id: ++toastId.current })), []);
 	const dismiss = useCallback((id: number) => setToasts((current) => current.filter((item) => item.id !== id)), []);
 	const offline = useRef(0);
-	const [drawer, setDrawer] = useState<{ mode: "create" } | { mode: "edit"; cardId: string } | null>(null);
+	// A click on a card reads it in the side drawer; New card and Edit open the large dialog to write in.
+	const [drawer, setDrawer] = useState<{ mode: "create" } | { mode: "edit"; cardId: string; dialog: boolean } | null>(null);
 	const [botsOpen, setBotsOpen] = useState(false);
 	const [activeId, setActiveId] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
@@ -256,8 +257,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const handlersFor = (card: CardView): CardHandlers => ({
 		onOpen: () => {
 			// The click that ends a drag is not a request to open the card.
-			if (Date.now() - droppedAt.current > 250) setDrawer({ mode: "edit", cardId: card.id });
+			if (Date.now() - droppedAt.current > 250) setDrawer({ mode: "edit", cardId: card.id, dialog: false });
 		},
+		onEdit: () => setDrawer({ mode: "edit", cardId: card.id, dialog: true }),
 		onDelete: () => {
 			if (window.confirm(`Delete “${card.title}”? This cannot be undone.`)) void send({ type: "deleteCard", cardId: card.id });
 		},
@@ -384,6 +386,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	}
 
 	const editing = drawer?.mode === "edit" ? cards.get(drawer.cardId) ?? null : null;
+	const dialog = drawer?.mode === "create" || (drawer?.mode === "edit" && drawer.dialog);
 	const shown = board.columns.reduce((sum, column) => sum + column.cards.filter(visible).length, 0);
 
 	return (
@@ -513,8 +516,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 
 				{drawer ? (
 					<CardDrawer
-						key={editing?.id ?? "new"}
+						key={`${editing?.id ?? "new"}:${dialog ? "dialog" : "drawer"}`}
 						card={editing}
+						dialog={dialog}
 						members={members}
 						onClose={() => setDrawer(null)}
 						send={send}

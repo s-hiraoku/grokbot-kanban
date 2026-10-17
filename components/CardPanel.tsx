@@ -1,12 +1,16 @@
 "use client";
 
-import { forwardRef, useEffect, useRef, useState, type HTMLAttributes } from "react";
+import { forwardRef, type HTMLAttributes } from "react";
 import { AvatarStack, MemberAvatar } from "@/components/Avatar";
-import { RUNNABLE } from "@/lib/domain";
+import { Menu, MenuItem, MenuNote, MenuTitle } from "@/components/ui/Menu";
+import { RUNNABLE, runnerOf } from "@/lib/domain";
 import type { CardView, MemberView } from "@/lib/view";
 
 export type CardHandlers = {
+	/** Reads the card in the side drawer. */
 	onOpen: () => void;
+	/** Opens the card in the large dialog, ready to write in. */
+	onEdit: () => void;
 	onDelete: () => void;
 	/** Asks a Grok Bot to carry out the card. */
 	onRun: (botId: string) => void;
@@ -60,7 +64,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				<h3 className="title" lang="ja">
 					{card.title || "Untitled"}
 				</h3>
-				{overlay ? null : <CardMenu card={card} handlers={handlers} />}
+				{overlay ? null : <CardMenu handlers={handlers} />}
 			</div>
 			{card.body ? (
 				<p className="body" lang="ja">
@@ -113,144 +117,102 @@ export function RunPill({ run }: { run: NonNullable<CardView["run"]> }) {
 	);
 }
 
-/** A small menu on the card that closes on an outside press or Escape. */
-function usePopover() {
-	const [open, setOpen] = useState(false);
-	const box = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		if (!open) return;
-		const close = (event: PointerEvent) => {
-			if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
-		};
-		const escape = (event: KeyboardEvent) => {
-			if (event.key === "Escape") setOpen(false);
-		};
-		document.addEventListener("pointerdown", close);
-		document.addEventListener("keydown", escape);
-		return () => {
-			document.removeEventListener("pointerdown", close);
-			document.removeEventListener("keydown", escape);
-		};
-	}, [open]);
-	return { open, setOpen, box };
-}
-
-/** Run on the card: pick a Grok Bot to carry it out, or see and cancel the run in progress. */
+/**
+ * Run on the card. With a Bot among the assignees it runs straight away; with none it asks which Bot to
+ * use. While a run is waiting or working, the badge opens a menu to cancel it.
+ */
 function CardRun({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
-	const { open, setOpen, box } = usePopover();
 	const run = card.run;
-	const assigned = new Set(card.assignees.map((member) => member.id));
-	const bots = [...handlers.bots.filter((bot) => assigned.has(bot.id)), ...handlers.bots.filter((bot) => !assigned.has(bot.id))];
 	if (!run && !RUNNABLE.includes(card.column)) return null;
 	const label = card.column === "inProgress" ? "Re-run" : "Run";
-	return (
-		<div className="card-run" ref={box} data-no-dnd>
-			{run ? (
-				<button type="button" className="run-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-					<RunPill run={run} />
-				</button>
-			) : (
-				<button
-					type="button"
-					className="card-run-button"
-					aria-label={`${label} with a Grok Bot`}
-					aria-haspopup="menu"
-					aria-expanded={open}
-					onClick={() => setOpen((value) => !value)}
+	const runner = runnerOf(
+		card.assignees.map((member) => member.id),
+		handlers.bots,
+	);
+	if (run) {
+		return (
+			<div className="card-run" data-no-dnd>
+				<Menu
+					align="start"
+					trigger={
+						<button type="button" className="run-trigger" aria-label={run.status === "working" ? `${run.bot.name} is running this card` : `Waiting for ${run.bot.name}`}>
+							<RunPill run={run} />
+						</button>
+					}
 				>
-					<svg viewBox="0 0 10 12" aria-hidden="true">
-						<path d="M1 1l8 5-8 5z" />
-					</svg>
+					<MenuNote>{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</MenuNote>
+					<MenuItem danger onSelect={handlers.onStopRun}>
+						Cancel run
+					</MenuItem>
+				</Menu>
+			</div>
+		);
+	}
+	if (runner) {
+		return (
+			<div className="card-run" data-no-dnd>
+				<button type="button" className="card-run-button" title={`${label} with ${runner.name}`} onClick={() => handlers.onRun(runner.id)}>
+					<PlayIcon />
 					{label}
 				</button>
-			)}
-			{open ? (
-				<div className="menu run-menu" role="menu">
-					{run ? (
-						<>
-							<p className="menu-note">{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</p>
-							<button
-								type="button"
-								role="menuitem"
-								className="danger-item"
-								onClick={() => {
-									setOpen(false);
-									handlers.onStopRun();
-								}}
-							>
-								Cancel run
-							</button>
-						</>
-					) : (
-						<>
-							<p className="menu-title">{label} with</p>
-							{bots.length === 0 ? <p className="menu-note">No bots yet. Connect one under Bots & MCP.</p> : null}
-							{bots.map((bot) => (
-								<button
-									key={bot.id}
-									type="button"
-									role="menuitem"
-									onClick={() => {
-										setOpen(false);
-										handlers.onRun(bot.id);
-									}}
-								>
-									<MemberAvatar member={bot} size={18} />
-									<span>{bot.name}</span>
-									{assigned.has(bot.id) ? <span className="menu-hint">assigned</span> : null}
-								</button>
-							))}
-						</>
-					)}
-				</div>
-			) : null}
+			</div>
+		);
+	}
+	return (
+		<div className="card-run" data-no-dnd>
+			<Menu
+				align="start"
+				className="run-menu"
+				trigger={
+					<button type="button" className="card-run-button" title={`${label} with a Grok Bot`}>
+						<PlayIcon />
+						{label}
+						<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
+							<path d="M1 1l4 4 4-4" />
+						</svg>
+					</button>
+				}
+			>
+				<MenuTitle>{label} with</MenuTitle>
+				{handlers.bots.length === 0 ? <MenuNote>No bots yet. Connect one under Bots & MCP.</MenuNote> : null}
+				{handlers.bots.map((bot) => (
+					<MenuItem key={bot.id} onSelect={() => handlers.onRun(bot.id)}>
+						<MemberAvatar member={bot} size={18} />
+						<span lang="ja">{bot.name}</span>
+					</MenuItem>
+				))}
+			</Menu>
 		</div>
 	);
 }
 
-function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
-	const { open, setOpen, box } = usePopover();
+function PlayIcon() {
 	return (
-		<div className="card-menu" ref={box} data-no-dnd>
-			<button
-				type="button"
-				className="menu-button"
-				aria-label="Card actions"
-				aria-haspopup="menu"
-				aria-expanded={open}
-				onClick={() => setOpen((value) => !value)}
+		<svg viewBox="0 0 10 12" aria-hidden="true">
+			<path d="M1 1l8 5-8 5z" />
+		</svg>
+	);
+}
+
+function CardMenu({ handlers }: { handlers: CardHandlers }) {
+	return (
+		<div className="card-menu" data-no-dnd>
+			<Menu
+				trigger={
+					<button type="button" className="menu-button" aria-label="Card actions">
+						<svg viewBox="0 0 4 16" aria-hidden="true">
+							<circle cx="2" cy="2" r="1.6" />
+							<circle cx="2" cy="8" r="1.6" />
+							<circle cx="2" cy="14" r="1.6" />
+						</svg>
+					</button>
+				}
 			>
-				<svg viewBox="0 0 4 16" aria-hidden="true">
-					<circle cx="2" cy="2" r="1.6" />
-					<circle cx="2" cy="8" r="1.6" />
-					<circle cx="2" cy="14" r="1.6" />
-				</svg>
-			</button>
-			{open ? (
-				<div className="menu" role="menu">
-					<button
-						type="button"
-						role="menuitem"
-						onClick={() => {
-							setOpen(false);
-							handlers.onOpen();
-						}}
-					>
-						Edit
-					</button>
-					<button
-						type="button"
-						role="menuitem"
-						className="danger-item"
-						onClick={() => {
-							setOpen(false);
-							handlers.onDelete();
-						}}
-					>
-						Delete
-					</button>
-				</div>
-			) : null}
+				<MenuItem onSelect={handlers.onEdit}>Edit</MenuItem>
+				<MenuItem danger onSelect={handlers.onDelete}>
+					Delete
+				</MenuItem>
+			</Menu>
 		</div>
 	);
 }

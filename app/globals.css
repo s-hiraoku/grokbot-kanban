@@ -359,7 +359,8 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 .card.overlay { cursor: grabbing; box-shadow: 0 18px 40px #0009; border-color: var(--amber); transition: transform 120ms ease, opacity 120ms ease; transform-origin: 0 0; }
 .card.overlay.to-member { transform: scale(0.5); opacity: 0.85; }
 .card.highlighted { border-color: var(--amber); box-shadow: 0 0 0 3px #f2b33d40; }
-.card.priority-low { opacity: 0.82; }
+/* Low priority fades the card's text only, so its open menus stay solid. */
+.card.priority-low :is(.title, .body, .tag, .card-foot) { opacity: 0.82; }
 
 .card-head { display: flex; gap: 6px; align-items: flex-start; }
 .card-menu { position: relative; flex: none; margin: -3px -6px 0 0; }
@@ -377,12 +378,13 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 }
 .menu-button svg { width: 4px; height: 16px; fill: currentColor; }
 .menu-button:hover, .menu-button[aria-expanded="true"] { background: var(--line-soft); color: var(--text); }
+/* Menus render in a portal above the page (components/ui/Menu.tsx); Radix places and flips them. */
 .menu {
-	position: absolute;
-	right: 0;
-	top: 30px;
-	z-index: 20;
-	min-width: 132px;
+	z-index: 60;
+	min-width: 180px;
+	max-width: min(280px, calc(100vw - 16px));
+	max-height: var(--radix-dropdown-menu-content-available-height, 70vh);
+	overflow-y: auto;
 	display: grid;
 	padding: 4px;
 	background: var(--deck-2);
@@ -390,7 +392,8 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	border-radius: 10px;
 	box-shadow: 0 12px 30px #0009;
 }
-.menu button { text-align: left; border: 0; background: transparent; border-radius: 7px; padding: 7px 10px; cursor: pointer; }
+.menu button { text-align: left; border: 0; background: transparent; border-radius: 7px; padding: 7px 10px; cursor: pointer; outline: none; }
+.menu button[data-highlighted] { background: var(--card); }
 .menu button:hover:not(:disabled, [aria-disabled="true"]) { background: var(--card); }
 .menu .danger-item { color: var(--danger); }
 .card .title { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.45; flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -464,10 +467,10 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	cursor: pointer;
 }
 .card-run-button svg { width: 8px; height: 10px; fill: currentColor; }
-.card-run-button:hover, .card-run-button[aria-expanded="true"] { background: var(--teal-soft); border-color: var(--teal); }
+.card-run-button .caret { width: 9px; height: 6px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.card-run-button:hover, .card-run-button[data-state="open"] { background: var(--teal-soft); border-color: var(--teal); }
 .run-trigger { border: 0; padding: 0; background: transparent; cursor: pointer; border-radius: 999px; }
-.run-trigger:hover .pill, .run-trigger[aria-expanded="true"] .pill { box-shadow: 0 0 0 1px currentColor; }
-.card-run .run-menu { left: 0; right: auto; top: 28px; min-width: 0; width: 200px; }
+.run-trigger:hover .pill, .run-trigger[data-state="open"] .pill { box-shadow: 0 0 0 1px currentColor; }
 .pr-link { font-size: 12px; font-weight: 700; text-decoration: none; padding: 1px 6px; border-radius: 6px; background: #26305a; color: #b9cbff; }
 /* Avatars */
 
@@ -551,10 +554,6 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 .drawer-tools svg.dots { width: 16px; height: 4px; fill: currentColor; stroke: none; }
 .card-id { font-family: var(--display); font-size: 12px; color: var(--faint); }
 
-.menu-anchor { position: relative; display: inline-flex; }
-.menu.left { left: 0; right: auto; top: 38px; }
-.menu.right { right: 0; top: 36px; }
-.menu { min-width: 180px; }
 .menu button { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .menu .danger-item { color: var(--danger); }
 .menu .current { font-weight: 700; }
@@ -705,19 +704,18 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 .assignees { position: relative; }
 .assignees-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .assignees-label { font-size: 12px; font-weight: 700; color: var(--muted); }
-.assignees-edit { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; }
-.assignees-edit svg { width: 15px; height: 15px; fill: currentColor; }
-.assignees-edit[aria-expanded="true"] { color: var(--amber); border-color: var(--line); }
+.assignees-edit[aria-expanded="true"] { color: var(--amber); border-color: var(--amber); }
 .assignees-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .assignees-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
 .assignees-list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assignees-none { margin: 0; font-size: 13px; color: var(--muted); }
 .assignees-menu {
-	position: absolute;
-	z-index: 5;
-	top: 34px;
-	left: 0;
-	right: 0;
+	z-index: 60;
+	width: min(300px, calc(100vw - 16px));
+	max-height: var(--radix-popover-content-available-height, 70vh);
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 14px 34px #0009;
 	background: var(--deck);
 	border: 1px solid var(--line);
 	border-radius: 10px;
@@ -725,8 +723,21 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	overflow: hidden;
 }
 .assignees-menu-title { margin: 0; padding: 8px 12px; font-size: 12px; font-weight: 700; border-bottom: 1px solid var(--line-soft); }
-.field .assignees-search { margin: 8px; width: calc(100% - 16px); }
-.assignees-options { list-style: none; margin: 0; padding: 0 0 4px; max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }
+.assignees-search {
+	display: block;
+	box-sizing: border-box;
+	margin: 8px;
+	width: calc(100% - 16px);
+	padding: 8px 10px;
+	background: var(--ink);
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	color: var(--text);
+	font: inherit;
+	font-size: 13px;
+}
+.assignees-search:focus { border-color: var(--amber); outline: none; }
+.assignees-options { list-style: none; margin: 0; padding: 0 0 4px; max-height: 320px; min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .assignees-options li { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; border-top: 1px solid var(--line-soft); }
 .assignees-options li.cursor { background: var(--card); }
 .assignees-options li .check { width: 14px; color: var(--amber); font-weight: 700; text-align: center; flex: none; }

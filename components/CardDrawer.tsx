@@ -2,9 +2,10 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import AssigneePicker from "@/components/AssigneePicker";
+import { Menu, MenuItem, MenuNote, MenuTitle, popupOpen } from "@/components/ui/Menu";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
-import { COLUMNS, RUNNABLE, type Column } from "@/lib/domain";
+import { COLUMNS, RUNNABLE, runnerOf, type Column } from "@/lib/domain";
 import type { ToastMessage } from "@/lib/notify";
 import type { CardView, MemberView } from "@/lib/view";
 
@@ -20,6 +21,7 @@ const PRIORITIES = [
  */
 export default function CardDrawer({
 	card,
+	dialog = false,
 	members,
 	send,
 	notify,
@@ -27,6 +29,8 @@ export default function CardDrawer({
 	onClose,
 }: {
 	card: CardView | null;
+	/** Opens as the large centered dialog instead of the side drawer, with the details ready to edit. */
+	dialog?: boolean;
 	members: readonly MemberView[];
 	send: (command: Command) => Promise<boolean>;
 	notify: (message: ToastMessage) => void;
@@ -47,9 +51,9 @@ export default function CardDrawer({
 	const [screened, setScreened] = useState(card?.screened ?? false);
 	const [reviewer, setReviewer] = useState(card?.reviewer === "grok" ? "grok" : "owner");
 	// Existing text opens as reading copy; a new card, or a card with nothing written yet, opens for typing.
-	const [editingBody, setEditingBody] = useState(!card?.body);
+	const [editingBody, setEditingBody] = useState(dialog || !card?.body);
 	const [editingNotes, setEditingNotes] = useState(false);
-	const [wide, setWide] = useState(false);
+	const [wide, setWide] = useState(dialog);
 	const [busy, setBusy] = useState(false);
 	const first = useRef<HTMLTextAreaElement>(null);
 	const panel = useRef<HTMLFormElement>(null);
@@ -58,8 +62,8 @@ export default function CardDrawer({
 		if (!card) first.current?.focus();
 		else panel.current?.focus();
 		const onKey = (event: KeyboardEvent) => {
-			// An open menu inside the panel handles its own Escape first.
-			if (event.key === "Escape" && !event.defaultPrevented) onClose();
+			// An open menu or popover inside the panel takes Escape first.
+			if (event.key === "Escape" && !event.defaultPrevented && !popupOpen()) onClose();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
@@ -165,33 +169,17 @@ export default function CardDrawer({
 							</svg>
 						</button>
 						{card ? (
-							<Menu label="More actions" icon={<DotsIcon />}>
-								{(close) => (
-									<>
-										<button
-											type="button"
-											role="menuitem"
-											onClick={() => {
-												close();
-												void copyLink();
-											}}
-										>
-											Copy link
-										</button>
-										<button
-											type="button"
-											role="menuitem"
-											className="danger-item"
-											disabled={busy}
-											onClick={() => {
-												close();
-												void remove();
-											}}
-										>
-											Delete card
-										</button>
-									</>
-								)}
+							<Menu
+								trigger={
+									<button type="button" className="icon" aria-label="More actions" title="More actions">
+										<DotsIcon />
+									</button>
+								}
+							>
+								<MenuItem onSelect={() => void copyLink()}>Copy link</MenuItem>
+								<MenuItem danger onSelect={() => void remove()}>
+									Delete card
+								</MenuItem>
 							</Menu>
 						) : null}
 						<button type="button" className="icon" aria-label="Close" onClick={onClose}>
@@ -239,6 +227,11 @@ export default function CardDrawer({
 								{body && !editingBody ? (
 									<button type="button" className="ghost small" onClick={() => setEditingBody(true)}>
 										Edit
+									</button>
+								) : null}
+								{body && editingBody ? (
+									<button type="button" className="ghost small" onClick={() => setEditingBody(false)}>
+										Preview
 									</button>
 								) : null}
 							</div>
@@ -387,66 +380,60 @@ export default function CardDrawer({
  */
 function RunMenu({ card, members, send }: { card: CardView; members: readonly MemberView[]; send: (command: Command) => Promise<boolean> }) {
 	const bots = members.filter((member) => member.kind === "bot");
-	const assigned = new Set(card.assignees.map((member) => member.id));
-	const ordered = [...bots.filter((bot) => assigned.has(bot.id)), ...bots.filter((bot) => !assigned.has(bot.id))];
 	const run = card.run;
 	if (!run && !RUNNABLE.includes(card.column)) return null;
 	const verb = card.column === "inProgress" ? "Re-run" : "Run";
+	// A Bot already on the card runs it straight away; the menu is only for choosing one.
+	const runner = runnerOf(
+		card.assignees.map((member) => member.id),
+		bots,
+	);
+	if (!run && runner) {
+		return (
+			<button type="button" className="run-button" title={`${verb} with ${runner.name}`} onClick={() => void send({ type: "run", cardId: card.id, bot: runner.id })}>
+				<svg className="play" viewBox="0 0 10 12" aria-hidden="true">
+					<path d="M1 1l8 5-8 5z" />
+				</svg>
+				<span>{verb}</span>
+			</button>
+		);
+	}
 	return (
 		<Menu
-			label={run ? `Run: ${run.status === "working" ? `${run.bot.name} working` : `waiting for ${run.bot.name}`}` : `${verb} with a Grok Bot`}
-			className={`run-button${run ? ` ${run.status}` : ""}`}
-			align="left"
-			icon={
-				<>
+			align="start"
+			trigger={
+				<button
+					type="button"
+					className={`run-button${run ? ` ${run.status}` : ""}`}
+					aria-label={run ? `Run: ${run.status === "working" ? `${run.bot.name} working` : `waiting for ${run.bot.name}`}` : `${verb} with a Grok Bot`}
+				>
 					{run ? <MemberAvatar member={run.bot} size={18} /> : <svg className="play" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" /></svg>}
 					<span>{run ? (run.status === "working" ? "Running" : "Requested") : verb}</span>
 					<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
 						<path d="M1 1l4 4 4-4" />
 					</svg>
-				</>
+				</button>
 			}
 		>
-			{(close) =>
-				run ? (
-					<>
-						<p className="menu-note">
-							{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}
-						</p>
-						<button
-							type="button"
-							role="menuitem"
-							className="danger-item"
-							onClick={() => {
-								close();
-								void send({ type: "stop", cardId: card.id });
-							}}
-						>
-							Cancel run
-						</button>
-					</>
-				) : (
-					<>
-						<p className="menu-title">{verb} with</p>
-						{ordered.length === 0 ? <p className="menu-note">No bots yet. Connect one under Bots & MCP.</p> : null}
-						{ordered.map((bot) => (
-							<button
-								key={bot.id}
-								type="button"
-								role="menuitem"
-								onClick={() => {
-									close();
-									void send({ type: "run", cardId: card.id, bot: bot.id });
-								}}
-							>
-								<MemberAvatar member={bot} size={20} />
-								<span lang="ja">{bot.name}</span>
-								{assigned.has(bot.id) ? <span className="menu-hint">assigned</span> : null}
-							</button>
-						))}
-					</>
-				)
-			}
+			{run ? (
+				<>
+					<MenuNote>{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}</MenuNote>
+					<MenuItem danger onSelect={() => void send({ type: "stop", cardId: card.id })}>
+						Cancel run
+					</MenuItem>
+				</>
+			) : (
+				<>
+					<MenuTitle>{verb} with</MenuTitle>
+					{bots.length === 0 ? <MenuNote>No bots yet. Connect one under Bots & MCP.</MenuNote> : null}
+					{bots.map((bot) => (
+						<MenuItem key={bot.id} onSelect={() => void send({ type: "run", cardId: card.id, bot: bot.id })}>
+							<MemberAvatar member={bot} size={20} />
+							<span lang="ja">{bot.name}</span>
+						</MenuItem>
+					))}
+				</>
+			)}
 		</Menu>
 	);
 }
@@ -456,102 +443,26 @@ function StatusMenu({ column, onMove }: { column: Column; onMove: (to: Column) =
 	const label = COLUMNS.find((item) => item.id === column)?.label ?? column;
 	return (
 		<Menu
-			label={`Status: ${label}. Move to another column`}
-			className={`status-button col-${column}`}
-			align="left"
-			icon={
-				<>
+			align="start"
+			trigger={
+				<button type="button" className={`status-button col-${column}`} aria-label={`Status: ${label}. Move to another column`}>
 					<span className="lamp" aria-hidden="true" />
 					<span>{label}</span>
 					<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
 						<path d="M1 1l4 4 4-4" />
 					</svg>
-				</>
+				</button>
 			}
 		>
-			{(close) => (
-				<>
-					<p className="menu-title">Move to</p>
-					{COLUMNS.map((item) => (
-						<button
-							key={item.id}
-							type="button"
-							role="menuitemradio"
-							aria-checked={item.id === column}
-							className={`col-${item.id}${item.id === column ? " current" : ""}`}
-							onClick={() => {
-								close();
-								if (item.id !== column) onMove(item.id);
-							}}
-						>
-							<span className="lamp" aria-hidden="true" />
-							{item.label}
-							{item.id === column ? <span className="menu-check" aria-hidden="true">✓</span> : null}
-						</button>
-					))}
-				</>
-			)}
+			<MenuTitle>Move to</MenuTitle>
+			{COLUMNS.map((item) => (
+				<MenuItem key={item.id} current={item.id === column} onSelect={() => item.id !== column && onMove(item.id)}>
+					<span className={`lamp col-${item.id}`} aria-hidden="true" />
+					{item.label}
+					{item.id === column ? <span className="menu-check" aria-hidden="true">✓</span> : null}
+				</MenuItem>
+			))}
 		</Menu>
-	);
-}
-
-/** A button with a dropdown menu that closes on an outside click or Escape. */
-function Menu({
-	label,
-	icon,
-	className = "icon",
-	align = "right",
-	children,
-}: {
-	label: string;
-	icon: ReactNode;
-	className?: string;
-	align?: "left" | "right";
-	children: (close: () => void) => ReactNode;
-}) {
-	const [open, setOpen] = useState(false);
-	const box = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		if (!open) return;
-		box.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]')?.focus();
-		const outside = (event: PointerEvent) => {
-			if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
-		};
-		const escape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			// Close the menu only, not the drawer around it.
-			event.preventDefault();
-			setOpen(false);
-			box.current?.querySelector<HTMLButtonElement>("button")?.focus();
-		};
-		document.addEventListener("pointerdown", outside);
-		document.addEventListener("keydown", escape, true);
-		return () => {
-			document.removeEventListener("pointerdown", outside);
-			document.removeEventListener("keydown", escape, true);
-		};
-	}, [open]);
-	return (
-		<div className="menu-anchor" ref={box}>
-			<button type="button" className={className} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-				{icon}
-			</button>
-			{open ? (
-				<div
-					className={`menu ${align}`}
-					role="menu"
-					onKeyDown={(event) => {
-						if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-						event.preventDefault();
-						const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)'));
-						const at = items.indexOf(document.activeElement as HTMLButtonElement);
-						items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
-					}}
-				>
-					{children(() => setOpen(false))}
-				</div>
-			) : null}
-		</div>
 	);
 }
 
