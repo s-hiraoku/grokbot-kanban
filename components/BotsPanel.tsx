@@ -13,12 +13,15 @@ type Draft = { id: string | null; name: string; role: string; avatar: string; co
 export default function BotsPanel({
 	bots,
 	owner,
+	closing = false,
 	onClose,
 	send,
 	notify,
 }: {
 	bots: readonly BotView[];
 	owner: MemberView;
+	/** Plays the exit animation; the board removes the panel when it ends. */
+	closing?: boolean;
 	onClose: () => void;
 	send: (command: Command) => Promise<boolean>;
 	notify: (message: ToastMessage) => void;
@@ -68,7 +71,7 @@ export default function BotsPanel({
 }`;
 
 	return (
-		<div className="modal-backdrop" onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
+		<div className={`modal-backdrop${closing ? " closing" : ""}`} onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
 			<div className="modal bots" role="dialog" aria-modal="true" aria-label="Bots and MCP">
 				<header className="modal-head">
 					<h2>Bots & MCP</h2>

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cardTitled, expectFullyVisible, signIn, tool, unique } from "./helpers";
+import { cardTitled, openMenu, expectFullyVisible, signIn, tool, unique } from "./helpers";
 
 test("a click reads the card in the drawer; New card and Edit open the dialog", async ({ page, request }) => {
 	const title = `open me ${unique()}`;
@@ -39,16 +39,16 @@ test("every drawer menu opens in full, and Escape closes the menu before the dra
 	const drawer = page.locator(".drawer");
 
 	await drawer.getByRole("button", { name: /^Status:/ }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.keyboard.press("Escape");
 	await expect(drawer).toBeVisible();
 
 	await drawer.getByRole("button", { name: "More actions" }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.keyboard.press("Escape");
 
 	await drawer.getByRole("button", { name: "Run with a Grok Bot" }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.keyboard.press("Escape");
 
 	// Assignees sit low in the drawer, under a long body.
@@ -78,11 +78,46 @@ test("on a phone the drawer menus and the assignee list fit the screen", async (
 	const drawer = page.locator(".drawer");
 
 	await drawer.getByRole("button", { name: /^Status:/ }).click();
-	await expectFullyVisible(page.getByRole("menu"));
+	await expectFullyVisible(openMenu(page));
 	await page.keyboard.press("Escape");
 
 	const edit = drawer.locator(".assignees-edit");
 	await edit.scrollIntoViewIfNeeded();
 	await edit.click();
 	await expectFullyVisible(page.locator(".assignees-menu"));
+});
+
+test("the drawer, the dialog, and menus animate out before they are removed", async ({ page, request }) => {
+	const title = `exit ${unique()}`;
+	await tool(request, "create_card", { bot: "Scout", title });
+	await signIn(page);
+	const card = cardTitled(page, title);
+
+	await card.locator(".title").click();
+	await expect(page.locator(".drawer")).toBeVisible();
+	await page.keyboard.press("Escape");
+	// Still on screen, sliding out, and not catching clicks meant for the board.
+	await expect(page.locator(".drawer-scrim.closing")).toHaveCount(1);
+	await expect(page.locator(".drawer-scrim.closing")).toHaveCSS("pointer-events", "none");
+	await expect(page.locator(".drawer-scrim")).toHaveCount(0);
+
+	await page.getByRole("button", { name: /New card/ }).click();
+	await page.getByRole("button", { name: "Close" }).click();
+	await expect(page.locator(".drawer-scrim.closing .drawer.wide")).toHaveCount(1);
+	await expect(page.locator(".drawer-scrim")).toHaveCount(0);
+
+	// Opening another card during the exit keeps the new one open.
+	await card.locator(".title").click();
+	await page.keyboard.press("Escape");
+	await card.locator(".title").click();
+	await page.waitForTimeout(400);
+	await expect(page.locator(".drawer")).toBeVisible();
+	await page.keyboard.press("Escape");
+
+	await card.getByRole("button", { name: "Card actions" }).click();
+	await expect(openMenu(page)).toBeVisible();
+	await page.keyboard.press("Escape");
+	await expect(page.locator(".menu[data-state=closed]")).toHaveCount(1);
+	await expect(page.locator(".menu")).toHaveCount(0);
+	await expect(openMenu(page)).toHaveCount(0);
 });

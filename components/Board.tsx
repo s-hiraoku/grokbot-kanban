@@ -21,6 +21,7 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useExit } from "./ui/useExit";
 import { MemberAvatar } from "@/components/Avatar";
 import BotsPanel from "@/components/BotsPanel";
 import CardDrawer from "@/components/CardDrawer";
@@ -88,8 +89,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const dismiss = useCallback((id: number) => setToasts((current) => current.filter((item) => item.id !== id)), []);
 	const offline = useRef(0);
 	// A click on a card reads it in the side drawer; New card and Edit open the large dialog to write in.
-	const [drawer, setDrawer] = useState<{ mode: "create" } | { mode: "edit"; cardId: string; dialog: boolean } | null>(null);
-	const [botsOpen, setBotsOpen] = useState(false);
+	const panel = useExit<{ mode: "create" } | { mode: "edit"; cardId: string; dialog: boolean }>();
+	const { value: drawer, open: openDrawer, close: closeDrawer } = panel;
+	const bots = useExit<true>();
 	const [activeId, setActiveId] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
 	const [memberFilter, setMemberFilter] = useState<string | null>(null);
@@ -219,7 +221,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 			if (event.metaKey || event.ctrlKey || event.altKey) return;
 			if (event.key === "n") {
 				event.preventDefault();
-				setDrawer({ mode: "create" });
+				openDrawer({ mode: "create" });
 			}
 			if (event.key === "/") {
 				event.preventDefault();
@@ -257,9 +259,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const handlersFor = (card: CardView): CardHandlers => ({
 		onOpen: () => {
 			// The click that ends a drag is not a request to open the card.
-			if (Date.now() - droppedAt.current > 250) setDrawer({ mode: "edit", cardId: card.id, dialog: false });
+			if (Date.now() - droppedAt.current > 250) openDrawer({ mode: "edit", cardId: card.id, dialog: false });
 		},
-		onEdit: () => setDrawer({ mode: "edit", cardId: card.id, dialog: true }),
+		onEdit: () => openDrawer({ mode: "edit", cardId: card.id, dialog: true }),
 		onDelete: () => {
 			if (window.confirm(`Delete “${card.title}”? This cannot be undone.`)) void send({ type: "deleteCard", cardId: card.id });
 		},
@@ -410,7 +412,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						<input id="board-search" type="search" placeholder="Search cards" value={query} onChange={(event) => setQuery(event.target.value)} lang="ja" />
 						<kbd>/</kbd>
 					</label>
-					<button type="button" className="primary new-card" onClick={() => setDrawer({ mode: "create" })} title="Shortcut: n">
+					<button type="button" className="primary new-card" onClick={() => openDrawer({ mode: "create" })} title="Shortcut: n">
 						<span aria-hidden="true">＋</span> New card
 					</button>
 				</header>
@@ -448,7 +450,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 							<span className="dock-name">Unassigned</span>
 							<span className="dock-load">{unassigned}</span>
 						</button>
-						<button type="button" className="ghost" onClick={() => setBotsOpen(true)}>
+						<button type="button" className="ghost" onClick={() => bots.open(true)}>
 							Bots & MCP
 						</button>
 						<form method="post" action="/api/auth/logout">
@@ -519,18 +521,19 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						key={`${editing?.id ?? "new"}:${dialog ? "dialog" : "drawer"}`}
 						card={editing}
 						dialog={dialog}
+						closing={panel.closing}
 						members={members}
-						onClose={() => setDrawer(null)}
+						onClose={closeDrawer}
 						send={send}
 						notify={notify}
 						onSubmit={async (payload) => {
 							const ok = editing ? await send({ type: "edit", cardId: editing.id, patch: payload }) : await send({ type: "create", content: payload });
-							if (ok) setDrawer(null);
+							if (ok) closeDrawer();
 							return ok;
 						}}
 					/>
 				) : null}
-				{botsOpen ? <BotsPanel bots={board.bots} owner={owner} onClose={() => setBotsOpen(false)} send={send} notify={notify} /> : null}
+				{bots.value ? <BotsPanel bots={board.bots} owner={owner} closing={bots.closing} onClose={bots.close} send={send} notify={notify} /> : null}
 				<Toasts toasts={toasts} onDismiss={dismiss} />
 			</div>
 		</DndContext>

@@ -547,6 +547,22 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	from { transform: scale(0.98); opacity: 0; }
 	to { transform: none; opacity: 1; }
 }
+/* Closing plays the opening in reverse (EXIT_MS in components/ui/useExit.ts); clicks pass through meanwhile. */
+.drawer-scrim, .modal-backdrop { animation: fade-in 160ms ease-out; }
+.drawer-scrim.closing, .modal-backdrop.closing { animation: fade-out 140ms ease-in forwards; pointer-events: none; }
+.drawer-scrim.closing .drawer { animation: slide-out 140ms ease-in forwards; }
+.drawer-scrim.closing .drawer.wide, .modal-backdrop.closing .modal { animation: grow-out 140ms ease-in forwards; }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes slide-out { to { transform: translateX(24px); opacity: 0; } }
+@keyframes grow-out { to { transform: scale(0.98); opacity: 0; } }
+/* Menus and the assignee list fade in toward the side they open on and fade out when closed. */
+.menu[data-state="open"], .assignees-menu[data-state="open"] { animation: pop-in 120ms ease-out; }
+.menu[data-state="closed"], .assignees-menu[data-state="closed"] { animation: pop-out 100ms ease-in forwards; }
+.menu[data-side="bottom"], .assignees-menu[data-side="bottom"] { --pop-y: -4px; }
+.menu[data-side="top"], .assignees-menu[data-side="top"] { --pop-y: 4px; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(var(--pop-y, 0)) scale(0.98); } }
+@keyframes pop-out { to { opacity: 0; transform: translateY(var(--pop-y, 0)) scale(0.98); } }
 .drawer-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); }
 .drawer-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
 .drawer-tools .icon { font-size: 20px; }
@@ -715,7 +731,6 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	max-height: var(--radix-popover-content-available-height, 70vh);
 	display: flex;
 	flex-direction: column;
-	box-shadow: 0 14px 34px #0009;
 	background: var(--deck);
 	border: 1px solid var(--line);
 	border-radius: 10px;
@@ -858,6 +873,7 @@ button:disabled, button[aria-disabled="true"] { opacity: 0.45; cursor: not-allow
 	overflow-y: auto;
 }
 .modal {
+	animation: grow-in 160ms ease-out;
 	width: min(720px, 100%);
 	background: var(--deck);
 	border: 1px solid var(--line);

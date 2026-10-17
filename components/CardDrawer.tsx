@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import AssigneePicker from "@/components/AssigneePicker";
-import { Menu, MenuItem, MenuNote, MenuTitle, popupOpen } from "@/components/ui/Menu";
+import { Menu, MenuItem, MenuNote, MenuTitle, escapeClaimed } from "@/components/ui/Menu";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
 import { COLUMNS, RUNNABLE, runnerOf, type Column } from "@/lib/domain";
@@ -22,6 +22,7 @@ const PRIORITIES = [
 export default function CardDrawer({
 	card,
 	dialog = false,
+	closing = false,
 	members,
 	send,
 	notify,
@@ -31,6 +32,8 @@ export default function CardDrawer({
 	card: CardView | null;
 	/** Opens as the large centered dialog instead of the side drawer, with the details ready to edit. */
 	dialog?: boolean;
+	/** Plays the exit animation; the board removes the drawer when it ends. */
+	closing?: boolean;
 	members: readonly MemberView[];
 	send: (command: Command) => Promise<boolean>;
 	notify: (message: ToastMessage) => void;
@@ -63,7 +66,7 @@ export default function CardDrawer({
 		else panel.current?.focus();
 		const onKey = (event: KeyboardEvent) => {
 			// An open menu or popover inside the panel takes Escape first.
-			if (event.key === "Escape" && !event.defaultPrevented && !popupOpen()) onClose();
+			if (event.key === "Escape" && !event.isComposing && !escapeClaimed(event)) onClose();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
@@ -125,7 +128,7 @@ export default function CardDrawer({
 	};
 
 	return (
-		<div className={`drawer-scrim${wide ? " wide" : ""}`} onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
+		<div className={`drawer-scrim${wide ? " wide" : ""}${closing ? " closing" : ""}`} onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
 			<form
 				ref={panel}
 				tabIndex={-1}

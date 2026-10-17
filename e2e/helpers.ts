@@ -36,6 +36,7 @@ export const columnOf = (page: Page, title: string) => page.locator(".column", {
  */
 export async function expectFullyVisible(popup: Locator) {
 	await expect(popup).toBeVisible();
+	await settled(popup);
 	const problems = await popup.evaluate((element) => {
 		const box = element.getBoundingClientRect();
 		const found: string[] = [];
@@ -53,3 +54,11 @@ export async function expectFullyVisible(popup: Locator) {
 	});
 	expect(problems).toEqual([]);
 }
+
+/** Waits for the element's and the page's running animations (a popup or drawer opening) to finish. */
+export async function settled(locator: Locator) {
+	await locator.evaluate(() => Promise.all(document.getAnimations().filter((item) => item.effect?.getComputedTiming().iterations !== Infinity).map((item) => item.finished.catch(() => undefined))));
+}
+
+/** The menu that is open now; one that just closed may still be fading out next to it. */
+export const openMenu = (page: Page) => page.locator('[role="menu"][data-state="open"]');

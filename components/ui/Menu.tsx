@@ -67,7 +67,21 @@ export function MenuNote({ children }: { children: ReactNode }) {
 	return <p className="menu-note">{children}</p>;
 }
 
-/** True while any menu or popover is open, so a surrounding drawer leaves Escape to it. */
-export function popupOpen(): boolean {
-	return document.querySelector("[data-radix-popper-content-wrapper]") !== null;
+const claimed = new WeakSet<KeyboardEvent>();
+
+// Radix closes a popup on Escape in its own capture listener and marks the key as handled even for a popup
+// that is only fading out. This listener is added first, so it sees which popup was open when the key came.
+if (typeof document !== "undefined") {
+	document.addEventListener(
+		"keydown",
+		(event) => {
+			if (event.key === "Escape" && document.querySelector('[data-radix-popper-content-wrapper] > [data-state="open"]')) claimed.add(event);
+		},
+		true,
+	);
+}
+
+/** True when this Escape closed an open menu or popover, so the drawer around it should stay open. */
+export function escapeClaimed(event: KeyboardEvent): boolean {
+	return claimed.has(event);
 }
