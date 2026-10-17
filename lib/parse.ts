@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CardContent, ContentPatch, HttpsUrl, ParkColumn } from "./domain";
+import type { CardContent, ContentPatch, HttpsUrl } from "./domain";
 
 export class BadRequest extends Error {
 	constructor(message = "bad_request") {
@@ -115,8 +115,6 @@ export const ownerCommandSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("create"), content: contentSchema }).strict(),
 	z.object({ type: z.literal("edit"), cardId: z.string().uuid(), patch: contentPatchSchema }).strict(),
 	z.object({ type: z.literal("move"), cardId: z.string().uuid(), to: parkColumn }).strict(),
-	z.object({ type: z.literal("run"), cardId: z.string().uuid() }).strict(),
-	z.object({ type: z.literal("stop"), cardId: z.string().uuid() }).strict(),
 	z
 		.object({ type: z.literal("drop"), cardId: z.string().uuid(), column: columnSchema, index: z.number().int().min(0).max(10_000) })
 		.strict(),
@@ -187,8 +185,4 @@ export function brandPatch(patch: z.infer<typeof contentPatchSchema>): ContentPa
 	if (patch.screening !== undefined) next.screening = patch.screening;
 	if (patch.assignees !== undefined) next.assignees = patch.assignees;
 	return next;
-}
-
-export function isParkColumn(value: string): value is ParkColumn {
-	return columnSchema.safeParse(value).success;
 }

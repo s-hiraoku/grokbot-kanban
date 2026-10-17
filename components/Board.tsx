@@ -26,7 +26,6 @@ import BotsPanel from "@/components/BotsPanel";
 import CardDrawer from "@/components/CardDrawer";
 import CardPanel, { type CardHandlers } from "@/components/CardPanel";
 import { COLUMNS, type Column, type ParkColumn } from "@/lib/domain";
-import { actionBlocked, dropHint, dropRefusal, dropTargets } from "@/lib/dropRules";
 import { OFFLINE_TOAST, ONLINE_TOAST, UNREACHABLE_TOAST, commandToast, pushToast, type ToastMessage } from "@/lib/notify";
 import Toasts, { type ShownToast } from "@/components/Toasts";
 import type { BoardView, BotView, CardView, MemberView } from "@/lib/view";
@@ -35,8 +34,6 @@ export type Command =
 	| { type: "create"; content: Record<string, unknown> }
 	| { type: "edit"; cardId: string; patch: Record<string, unknown> }
 	| { type: "move"; cardId: string; to: ParkColumn }
-	| { type: "run"; cardId: string }
-	| { type: "stop"; cardId: string }
 	| { type: "drop"; cardId: string; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: Record<string, unknown> }
 	| { type: "deleteBot"; id: string }
@@ -139,7 +136,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const owner = useMemo<MemberView>(() => ({ ...OWNER, avatar: board.owner.avatar }), [board.owner.avatar]);
 	const members = useMemo<MemberView[]>(() => [owner, ...board.bots], [owner, board.bots]);
 	const activeCard = activeId ? cards.get(activeId) ?? null : null;
-	const allowed = activeCard ? dropTargets(activeCard) : null;
 
 	const accept = useCallback((next: BoardView) => {
 		if (dragging.current) {
@@ -191,19 +187,18 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		}
 	}, [accept, notify]);
 
-	// Fast while an agent is queued or running, slower otherwise so bot edits still show up.
-	const live = board.agents.running + board.agents.queued > 0;
+	// Poll so bot edits show up without a reload.
 	useEffect(() => {
 		const timer = window.setInterval(() => {
 			if (document.visibilityState === "visible") void refresh();
-		}, live ? 4000 : 15000);
+		}, 15000);
 		const onFocus = () => void refresh();
 		window.addEventListener("focus", onFocus);
 		return () => {
 			window.clearInterval(timer);
 			window.removeEventListener("focus", onFocus);
 		};
-	}, [live, refresh]);
+	}, [refresh]);
 
 	useEffect(() => {
 		const id = new URLSearchParams(window.location.search).get("card");
@@ -243,13 +238,12 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 				window.location.href = "/login";
 				return false;
 			}
-			const payload = (await response.json().catch(() => ({}))) as { board?: BoardView; notice?: string | null; tone?: string | null };
+			const payload = (await response.json().catch(() => ({}))) as { board?: BoardView; notice?: string | null };
 			if (payload.board) accept(payload.board);
 			else if (!response.ok) await refresh();
 			const message = commandToast(response.status, payload);
 			if (message) notify(message);
-			// A warning means the board did something other than what was asked, so callers treat it as not done.
-			return response.ok && payload.tone !== "warning" && payload.tone !== "error";
+			return response.ok;
 		} catch {
 			notify(UNREACHABLE_TOAST);
 			await refresh();
@@ -258,8 +252,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	}
 
 	const handlersFor = (card: CardView): CardHandlers => ({
-		onRun: () => void send({ type: "run", cardId: card.id }),
-		onStop: () => void send({ type: "stop", cardId: card.id }),
 		onOpen: () => {
 			// The click that ends a drag is not a request to open the card.
 			if (Date.now() - droppedAt.current > 250) setDrawer({ mode: "edit", cardId: card.id });
@@ -267,7 +259,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		onDelete: () => {
 			if (window.confirm(`Delete “${card.title}”? This cannot be undone.`)) void send({ type: "deleteCard", cardId: card.id });
 		},
-		onBlocked: (reason) => notify({ text: reason, tone: "warning" }),
 	});
 
 	const needle = query.trim().toLowerCase();
@@ -314,7 +305,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		const from = containerOf(id);
 		const to = containerOf(String(over.id));
 		const card = cards.get(id);
-		if (!from || !to || from === to || !card || !dropTargets(card).has(to)) return;
+		if (!from || !to || from === to || !card) return;
 		justMoved.current = true;
 		setOrder((current) => {
 			const source = current[from].filter((item) => item !== id);
@@ -357,9 +348,8 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		}
 		const to = overId ? containerOf(overId) : null;
 		const origin = dragOrigin.current;
-		if (!card || !to || !dropTargets(card).has(to)) {
+		if (!card || !to) {
 			setOrder(orderOf(queued ?? board));
-			if (card && to && to !== card.column) notify({ text: dropRefusal(card, to), tone: "warning" });
 			return;
 		}
 		let list = order[to];
@@ -412,7 +402,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 						<input id="board-search" type="search" placeholder="Search cards" value={query} onChange={(event) => setQuery(event.target.value)} lang="ja" />
 						<kbd>/</kbd>
 					</label>
-					<SlotMeter running={board.agents.running} queued={board.agents.queued} capacity={board.agents.capacity} />
 					<button type="button" className="primary new-card" onClick={() => setDrawer({ mode: "create" })} title="Shortcut: n">
 						<span aria-hidden="true">＋</span> New card
 					</button>
@@ -481,7 +470,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 					<div className="columns">
 						{board.columns.map((column) => {
 							const ids = (order[column.id] ?? []).filter((id) => cards.has(id) && visible(cards.get(id)!));
-							const state = allowed ? (allowed.has(column.id) ? "can-drop" : "no-drop") : "";
+							const state = activeCard ? "can-drop" : "";
 							const isFolded = folded.includes(column.id);
 							return (
 								<ColumnShell
@@ -490,7 +479,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 									label={column.label}
 									count={(order[column.id] ?? []).length}
 									state={state}
-									hint={dropHint(activeCard, column.id)}
 									folded={isFolded}
 									onFold={FOLDABLE.includes(column.id) ? () => toggleFold(column.id) : null}
 									onAdd={column.id === "inbox" ? () => setQuickAdd(true) : null}
@@ -540,23 +528,6 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	);
 }
 
-function SlotMeter({ running, queued, capacity }: { running: number; queued: number; capacity: number }) {
-	const label = `${running} of ${capacity} agents running${queued ? `, ${queued} waiting` : ""}`;
-	return (
-		<div className="slots" role="img" aria-label={label} title={label}>
-			<span className="slots-lights" aria-hidden="true">
-				{Array.from({ length: capacity }, (_, index) => (
-					<span key={index} className={index < running ? "light on" : "light"} />
-				))}
-			</span>
-			<span className="slots-text" aria-hidden="true">
-				{running}/{capacity}
-				{queued ? <span className="slots-queue">+{queued} waiting</span> : null}
-			</span>
-		</div>
-	);
-}
-
 function DockMember({ member, load, active, onClick, droppable }: { member: MemberView | BotView; load: number; active: boolean; onClick: () => void; droppable: boolean }) {
 	const { setNodeRef, isOver } = useDroppable({ id: `${MEMBER_DROP}${member.id}`, disabled: !droppable, data: { pinpoint: true } });
 	const bot = "role" in member ? member : null;
@@ -589,7 +560,6 @@ function ColumnShell({
 	label,
 	count,
 	state,
-	hint,
 	folded,
 	onFold,
 	onAdd,
@@ -599,7 +569,6 @@ function ColumnShell({
 	label: string;
 	count: number;
 	state: string;
-	hint: string | null;
 	folded: boolean;
 	onFold: (() => void) | null;
 	onAdd: (() => void) | null;
@@ -623,7 +592,6 @@ function ColumnShell({
 					</button>
 				) : null}
 			</header>
-			{hint ? <p className="drop-hint">{hint}</p> : null}
 			<div className="column-body">{children}</div>
 		</section>
 	);
@@ -670,43 +638,7 @@ function QuickAdd({ onAdd, onCancel }: { onAdd: (title: string) => Promise<boole
 }
 
 function SortableCard({ card, handlers, highlighted }: { card: CardView; handlers: CardHandlers; highlighted: boolean }) {
-	const draggable = card.moveTargets.length > 0;
-	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id, disabled: !draggable });
-	// A locked card does not follow the pointer, so a drag attempt on it says why instead of doing nothing.
-	const press = useRef<{ x: number; y: number; told: boolean } | null>(null);
-	const explain = () => {
-		const reason = actionBlocked(card, "move");
-		if (reason) handlers.onBlocked(reason);
-	};
-	const lockedHandlers = draggable
-		? {}
-		: {
-				onPointerDown: (event: React.PointerEvent) => {
-					if (event.button === 0 && !(event.target instanceof Element && event.target.closest("button, a, [data-no-dnd]"))) {
-						press.current = { x: event.clientX, y: event.clientY, told: false };
-					}
-				},
-				onPointerMove: (event: React.PointerEvent) => {
-					const start = press.current;
-					if (!start || start.told || Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
-					start.told = true;
-					explain();
-				},
-				// The click that ends a refused drag is not a request to open the card.
-				onClickCapture: (event: React.MouseEvent) => {
-					if (press.current?.told) event.stopPropagation();
-					press.current = null;
-				},
-				onPointerCancel: () => {
-					press.current = null;
-				},
-				onKeyDown: (event: React.KeyboardEvent) => {
-					if (event.key === " " && event.target === event.currentTarget) {
-						event.preventDefault();
-						explain();
-					}
-				},
-			};
+	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
 	return (
 		<CardPanel
 			ref={setNodeRef}
@@ -715,22 +647,19 @@ function SortableCard({ card, handlers, highlighted }: { card: CardView; handler
 			dragging={isDragging}
 			highlighted={highlighted}
 			style={{ transform: CSS.Translate.toString(transform), transition }}
-			className={draggable ? "grab" : "locked"}
+			className="grab"
 			{...attributes}
 			{...listeners}
-			{...lockedHandlers}
-			aria-roledescription={draggable ? "draggable card" : "card"}
-			// A running card cannot be dragged, but it still opens.
-			aria-disabled={undefined}
+			aria-roledescription="draggable card"
 		/>
 	);
 }
 
 function emptyText(column: Column): string {
 	if (column === "inbox") return "New requests from bots land here";
-	if (column === "todo") return "Drop a card here to queue it";
+	if (column === "todo") return "Cards ready to work on";
 	if (column === "inProgress") return "Nothing in progress";
-	if (column === "inReview") return "Cards waiting for review, including agent PRs";
+	if (column === "inReview") return "Cards waiting for review";
 	return "Nothing here yet";
 }
 

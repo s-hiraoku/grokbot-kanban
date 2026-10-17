@@ -2,16 +2,11 @@
 
 import { forwardRef, useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { AvatarStack, MemberAvatar } from "@/components/Avatar";
-import { actionBlocked } from "@/lib/dropRules";
 import type { CardView } from "@/lib/view";
 
 export type CardHandlers = {
-	onRun: () => void;
-	onStop: () => void;
 	onOpen: () => void;
 	onDelete: () => void;
-	/** Explains, in a warning toast, why an action did nothing. */
-	onBlocked: (reason: string) => void;
 };
 
 type Props = {
@@ -32,7 +27,6 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 		"card",
 		`priority-${card.priority}`,
 		lead ? "" : "no-owner",
-		card.pill ? `is-${card.pill.label}` : "",
 		dragging ? "dragging" : "",
 		overlay ? "overlay" : "",
 		highlighted ? "highlighted" : "",
@@ -40,7 +34,6 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 	]
 		.filter(Boolean)
 		.join(" ");
-	const showAction = card.action.command === "stop" || (card.action.enabled && card.repo !== null && card.column !== "done" && card.column !== "wontDo");
 
 	return (
 		<article
@@ -61,12 +54,6 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				<h3 className="title" lang="ja">
 					{card.title || "Untitled"}
 				</h3>
-				{card.pill ? (
-					<span className={`pill ${card.pill.label}`}>
-						{card.pill.label === "running" ? <span className="pulse" aria-hidden="true" /> : null}
-						{card.pill.label === "running" ? "Running" : "Waiting for a slot"}
-					</span>
-				) : null}
 				{overlay ? null : <CardMenu card={card} handlers={handlers} />}
 			</div>
 			{card.body ? (
@@ -82,7 +69,6 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				{card.source ? <span className="tag">{card.source}</span> : null}
 				{card.screened ? <span className="tag ok">Screened</span> : null}
 			</div>
-			{card.failure ? <p className="failure">{card.failure}</p> : null}
 			<footer className="card-foot">
 				<span className="filed" title={card.createdBy ? `Filed by ${card.createdBy.name}` : "Filed over the API"}>
 					{card.createdBy ? <MemberAvatar member={card.createdBy} size={18} /> : <span className="avatar unknown" style={{ width: 18, height: 18 }}>?</span>}
@@ -100,22 +86,6 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				) : (
 					<span className="owners nobody">Unassigned</span>
 				)}
-				{showAction ? (
-					<button
-						type="button"
-						className={`card-action ${card.action.command}`}
-						aria-disabled={!card.action.enabled || undefined}
-						data-no-dnd
-						onClick={() => {
-							const reason = actionBlocked(card, card.action.command);
-							if (reason) handlers.onBlocked(reason);
-							else if (card.action.command === "stop") handlers.onStop();
-							else handlers.onRun();
-						}}
-					>
-						{card.action.label}
-					</button>
-				) : null}
 			</footer>
 		</article>
 	);
@@ -141,7 +111,6 @@ function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }
 			document.removeEventListener("keydown", escape);
 		};
 	}, [open]);
-	const live = card.pill !== null;
 	return (
 		<div className="card-menu" ref={box} data-no-dnd>
 			<button
@@ -174,13 +143,9 @@ function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }
 						type="button"
 						role="menuitem"
 						className="danger-item"
-						aria-disabled={live || undefined}
-						title={live ? "Stop the agent before deleting this card." : undefined}
 						onClick={() => {
 							setOpen(false);
-							const reason = actionBlocked(card, "delete");
-							if (reason) handlers.onBlocked(reason);
-							else handlers.onDelete();
+							handlers.onDelete();
 						}}
 					>
 						Delete

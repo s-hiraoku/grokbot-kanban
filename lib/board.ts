@@ -1,44 +1,24 @@
-import { isBot, isCron, isOwner, type Bot, type Cron, type Owner } from "./auth";
+import { isBot, isOwner, type Bot, type Owner } from "./auth";
 import { botIdFor, cleanBotName, colorFor, type BotProfile, type BotProfilePatch } from "./bots";
 import { DEFAULT_OWNER_AVATAR } from "./ownerAvatar";
-import type { CursorClient } from "./cursor";
 import {
 	COLUMNS,
 	OWNER_MEMBER,
-	START_TIMEOUT_MS,
-	actionFor,
 	columnOf,
-	failureMessage,
-	isSlotHolder,
-	moveTargetsFor,
+	moved,
 	nextRank,
 	rankBetween,
-	planPromotions,
-	transition,
 	type Card,
 	type CardContent,
-	type CardEvent,
 	type CardId,
 	type Column,
 	type ContentPatch,
 	type Instant,
-	type LaunchId,
 	type MemberId,
 	type ParkColumn,
-	type Rejection,
 } from "./domain";
-import { isParkColumn } from "./parse";
 import type { Store } from "./store";
-import {
-	noticeFor,
-	toBoardView,
-	toBotCard,
-	toBotView,
-	type BoardView,
-	type BotCardView,
-	type BotView,
-	type CommandOutcome,
-} from "./view";
+import { toBoardView, toBotCard, toBotView, type BoardView, type BotCardView, type BotView } from "./view";
 
 export type NewCardInput = { externalId: string | null; content: CardContent };
 
@@ -48,8 +28,6 @@ export type OwnerCommand =
 	| { type: "create"; content: CardContent }
 	| { type: "edit"; cardId: CardId; patch: ContentPatch }
 	| { type: "move"; cardId: CardId; to: ParkColumn }
-	| { type: "run"; cardId: CardId }
-	| { type: "stop"; cardId: CardId }
 	| { type: "drop"; cardId: CardId; column: Column; index: number }
 	| { type: "saveBot"; id: string | null; profile: BotProfileInput }
 	| { type: "deleteBot"; id: string }
@@ -59,8 +37,6 @@ export type OwnerCommand =
 export type CommandResult = {
 	board: BoardView;
 	notice: string | null;
-	/** "warning" when the command went through but did not do what the drop or click suggests. */
-	tone?: "warning" | "error";
 	error: null | "not_found" | "busy" | "bad_request";
 };
 
@@ -71,11 +47,9 @@ export class BoardInputError extends Error {
 		this.name = "BoardInputError";
 	}
 }
-export type SyncReport = { observed: number; started: number; agents: BoardView["agents"] };
 
 export type OwnerBoard = {
 	view(): Promise<BoardView>;
-	sync(): Promise<BoardView>;
 	execute(command: OwnerCommand): Promise<CommandResult>;
 	/** The stored icon of a bot, for the image route. */
 	avatar(botId: string): Promise<string | null>;
@@ -93,7 +67,6 @@ export type CardFilter = {
 export type AssignChange = { add?: readonly string[]; remove?: readonly string[]; set?: readonly string[] };
 
 export type BoardSummary = {
-	agents: BoardView["agents"];
 	columns: { id: Column; label: string; count: number }[];
 	mine: BotCardView[];
 	unassignedInbox: number;
@@ -101,8 +74,7 @@ export type BoardSummary = {
 
 /**
  * What a bot may do. `actor` is the calling bot's name as it appears in its Grok Bot profile.
- * A new name joins the roster on first use. A bot may park a card in Inbox, Todo, Done, or Won't Do,
- * but never starts, stops, or dequeues a run: Todo from a bot only parks the card.
+ * A new name joins the roster on first use. A bot may move a card to any column.
  */
 export type BotBoard = {
 	create(input: NewCardInput, actor?: string | null): Promise<{ card: BotCardView; created: boolean }>;
@@ -119,38 +91,22 @@ export type BotBoard = {
 	summary(actor: string | null): Promise<BoardSummary>;
 };
 
-export type CronBoard = { sync(): Promise<SyncReport> };
-
 export type BoardDeps = {
 	store: Store;
-	cursor: CursorClient;
 	now: () => Instant;
-	newId: () => string;
 };
 
 export type BoardHandle = {
 	owner(cap: Owner): OwnerBoard;
 	bot(cap: Bot): BotBoard;
-	cron(cap: Cron): CronBoard;
 };
 
-type Applied =
-	| { kind: "written"; card: Card }
-	| { kind: "unchanged"; card: Card }
-	| { kind: "stale"; card: Card }
-	| { kind: "rejected"; reason: Rejection }
-	| { kind: "slotTaken" }
-	| { kind: "missing" }
-	| { kind: "conflict" };
+type Applied = { kind: "written"; card: Card } | { kind: "unchanged"; card: Card } | { kind: "missing" } | { kind: "conflict" };
 
 export function openBoard(deps: BoardDeps): BoardHandle {
 	const ownerApi: OwnerBoard = {
 		view: () => viewOf(deps),
 		avatar: async (botId) => (await deps.store.bot(botId))?.avatar ?? (botId === OWNER_MEMBER ? DEFAULT_OWNER_AVATAR : null),
-		sync: async () => {
-			await syncOnce(deps);
-			return viewOf(deps);
-		},
 		execute: (command) => execute(deps, command),
 	};
 	return {
@@ -161,16 +117,6 @@ export function openBoard(deps: BoardDeps): BoardHandle {
 		bot(cap) {
 			if (!isBot(cap)) throw new Error("unauthorized");
 			return botApi(deps);
-		},
-		cron(cap) {
-			if (!isCron(cap)) throw new Error("unauthorized");
-			return {
-				sync: async () => {
-					const report = await syncOnce(deps);
-					const board = await viewOf(deps);
-					return { ...report, agents: board.agents };
-				},
-			};
 		},
 	};
 }
@@ -264,15 +210,9 @@ function botApi(deps: BoardDeps): BotBoard {
 			if (!card) return null;
 			const from = columnOf(card.state);
 			if (from === to) return toBotCard(card, await store.bots());
-			// Queued and running cards belong to the owner's run controls; moving one would dequeue or stop it.
-			if (card.state.kind !== "idle" && card.state.kind !== "review") {
-				throw new BoardInputError(`This card is ${card.state.kind === "queued" ? "waiting for an agent slot" : "running a Cursor agent"}. Only the owner can move it now.`);
-			}
-			if (!moveTargetsFor(card.state).includes(to)) throw new BoardInputError(`This card cannot move to ${labelOf(to)}.`);
 			const siblings = (await store.all()).filter((item) => item.id !== card.id && columnOf(item.state) === to);
-			const applied = await apply(deps, card.id, { type: "move", to });
-			if (applied.kind === "conflict" || applied.kind === "slotTaken") throw new BoardInputError("The board is busy. Try again.");
-			if (applied.kind === "rejected") throw new BoardInputError(noticeFor(applied) ?? "That move was refused.");
+			const applied = await move(deps, card.id, to);
+			if (applied.kind === "conflict") throw new BoardInputError("The board is busy. Try again.");
 			if (applied.kind === "missing") return null;
 			await store.writeRank(card.id, rankBetween(siblings.at(-1)?.rank ?? null, null));
 			const stamp = new Date(now()).toISOString().slice(0, 16).replace("T", " ");
@@ -301,7 +241,6 @@ function botApi(deps: BoardDeps): BotBoard {
 			const roster = await store.bots();
 			const view = toBoardView(cards, roster, now());
 			return {
-				agents: view.agents,
 				columns: view.columns.map((column) => ({ id: column.id, label: column.label, count: column.count })),
 				mine: bot
 					? cards.filter((card) => card.content.assignees.includes(bot.id)).map((card) => toBotCard(card, roster))
@@ -417,10 +356,6 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 	if (command.type === "deleteCard") {
 		const card = await deps.store.get(command.cardId);
 		if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
-		// A queued or running card is tied to a slot and maybe a live agent. Stop it first.
-		if (card.state.kind !== "idle" && card.state.kind !== "review") {
-			throw new BoardInputError("Stop the agent before deleting this card.");
-		}
 		await deps.store.deleteCard(card.id);
 		return { board: await viewOf(deps), notice: "Card deleted", error: null };
 	}
@@ -444,55 +379,20 @@ async function executeChecked(deps: BoardDeps, command: OwnerCommand): Promise<C
 			now: deps.now(),
 			createdBy: OWNER_MEMBER,
 		});
-		const board = await viewOf(deps);
-		return {
-			board,
-			notice: noticeFor({ kind: "settled", command: "create", state: { kind: "idle", column: "inbox", last: null } }),
-			error: null,
-		};
+		return { board: await viewOf(deps), notice: "Card added", error: null };
 	}
 	if (command.type === "edit") {
 		const patch = { ...command.patch };
 		if (patch.assignees) patch.assignees = await members(patch.assignees);
 		const card = await deps.store.patchContent(command.cardId, patch);
 		if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
-		return {
-			board: await viewOf(deps),
-			notice: noticeFor({ kind: "settled", command: "edit", state: card.state }),
-			error: null,
-		};
+		return { board: await viewOf(deps), notice: null, error: null };
 	}
 
-	const event: CardEvent =
-		command.type === "move"
-			? { type: "move", to: command.to }
-			: command.type === "run"
-				? { type: "run" }
-				: { type: "stop" };
-	const applied = await apply(deps, command.cardId, event);
+	const applied = await move(deps, command.cardId, command.to);
 	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
 	if (applied.kind === "conflict") return { board: await viewOf(deps), notice: null, error: "busy" };
-	if (applied.kind === "rejected") {
-		return { board: await viewOf(deps), notice: noticeFor(applied), tone: "warning", error: null };
-	}
-	if (command.type === "run") await fillSlots(deps);
-	if (command.type === "stop" && applied.kind === "written" && applied.card.state.kind === "stopping") {
-		await settleStop(deps, applied.card);
-	}
-	if (command.type === "stop" && applied.kind === "written" && applied.card.state.kind === "idle") {
-		await fillSlots(deps);
-	}
-	const fresh = await deps.store.get(command.cardId);
-	const state = fresh?.state ?? (applied.kind === "written" || applied.kind === "unchanged" ? applied.card.state : null);
-	const outcome: CommandOutcome = state
-		? { kind: "settled", command: command.type, state }
-		: { kind: "missing" };
-	// A run that Cursor refused is back to idle; say why in a red toast instead of only on the card.
-	const refused = command.type === "run" && state?.kind === "idle" ? failureMessage(state) : null;
-	if (refused) return { board: await viewOf(deps), notice: refused, tone: "error", error: null };
-	// A run that only queued, or whose launch is unconfirmed, did not start an agent yet.
-	const tone = command.type === "run" && state && state.kind !== "running" ? ("warning" as const) : undefined;
-	return { board: await viewOf(deps), notice: noticeFor(outcome), ...(tone ? { tone } : {}), error: state ? null : "not_found" };
+	return { board: await viewOf(deps), notice: null, error: null };
 }
 
 async function saveBot(deps: BoardDeps, id: string | null, profile: BotProfileInput): Promise<CommandResult> {
@@ -523,129 +423,30 @@ async function saveBot(deps: BoardDeps, id: string | null, profile: BotProfileIn
 	return { board: await viewOf(deps), notice: "Bot added", error: null };
 }
 
-/**
- * A card dropped on a column at a position. Same column only reorders. Todo or In Progress with a repo
- * starts a run, as the Run button does. Without a repo, Todo and In Progress park the card, so hand work
- * can be tracked there. In Review always parks. A queued card dropped on In Progress stays queued.
- */
+/** A card dropped on a column at a position. Same column only reorders. */
 async function drop(deps: BoardDeps, command: Extract<OwnerCommand, { type: "drop" }>): Promise<CommandResult> {
 	const card = await deps.store.get(command.cardId);
 	if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
-	const from = columnOf(card.state);
-	const action = actionFor(card.state);
-	const wantsRun = (command.column === "todo" || command.column === "inProgress") && from !== command.column;
-	let event: CardEvent | null = null;
-	let parkedNotice: string | null = null;
-	if (from !== command.column) {
-		if (wantsRun && action.command === "run" && action.enabled && card.content.repo) event = { type: "run" };
-		else if (card.state.kind === "queued" && command.column === "inProgress") {
-			return { board: await viewOf(deps), notice: "This card is already waiting for an agent slot.", tone: "warning", error: null };
-		} else if (isParkColumn(command.column) && moveTargetsFor(card.state).includes(command.column)) {
-			event = { type: "move", to: command.column };
-			if (command.column === "todo" && !card.content.repo) parkedNotice = "Parked in Todo. Set a repo to run it.";
-			if (command.column === "inProgress" && !card.content.repo) parkedNotice = "Moved to In Progress without an agent. Set a repo to run one.";
-		} else {
-			return { board: await viewOf(deps), notice: dropRefusal(card), tone: "warning", error: null };
-		}
-	}
-	const all = await deps.store.all();
-	const target = event?.type === "run" ? "todo" : command.column;
-	const siblings = all.filter((item) => item.id !== card.id && columnOf(item.state) === target);
+	const siblings = (await deps.store.all()).filter((item) => item.id !== card.id && columnOf(item.state) === command.column);
 	const index = Math.min(command.index, siblings.length);
 	const rank = rankBetween(siblings[index - 1]?.rank ?? null, siblings[index]?.rank ?? null);
 	await deps.store.writeRank(card.id, rank);
-	if (!event) return { board: await viewOf(deps), notice: null, error: null };
-	const result = await executeChecked(deps, event.type === "run" ? { type: "run", cardId: card.id } : { type: "move", cardId: card.id, to: (event as { to: ParkColumn }).to });
-	return parkedNotice && !result.error ? { ...result, notice: parkedNotice, tone: "warning" } : result;
+	return executeChecked(deps, { type: "move", cardId: card.id, to: command.column });
 }
 
-function dropRefusal(card: Card): string {
-	if (isSlotHolder(card.state)) return noticeFor({ kind: "rejected", reason: "activeRun" }) ?? "";
-	if (!card.content.repo) return noticeFor({ kind: "rejected", reason: "noRepo" }) ?? "";
-	return "This card is already queued for an agent.";
-}
-
-async function apply(deps: BoardDeps, cardId: CardId, event: CardEvent): Promise<Applied> {
-	const ctx = { now: deps.now(), freshLaunchId: deps.newId() as LaunchId };
+async function move(deps: BoardDeps, cardId: CardId, to: Column): Promise<Applied> {
 	for (let attempt = 0; attempt < 3; attempt++) {
 		const card = await deps.store.get(cardId);
 		if (!card) return { kind: "missing" };
-		const result = transition(card, event, ctx);
-		if (result.kind === "rejected") return result;
-		if (result.kind === "stale") return { kind: "stale", card };
-		if (result.kind === "unchanged") return { kind: "unchanged", card };
-		const written = await deps.store.writeState(card.id, card.version, { state: result.state, rank: card.rank });
-		if (written === "slotTaken") return { kind: "slotTaken" };
+		const state = moved(card.state, to);
+		if (!state) return { kind: "unchanged", card };
+		const written = await deps.store.writeState(card.id, card.version, { state, rank: card.rank });
 		if (written === "conflict") continue;
 		const fresh = await deps.store.get(cardId);
 		if (!fresh) return { kind: "missing" };
 		return { kind: "written", card: fresh };
 	}
 	return { kind: "conflict" };
-}
-
-async function fillSlots(deps: BoardDeps): Promise<number> {
-	let started = 0;
-	const plan = planPromotions(await deps.store.all());
-	for (const item of plan) {
-		const claim = await apply(deps, item.cardId, {
-			type: "slotClaimed",
-			launchId: item.launchId,
-			slot: item.slot,
-		});
-		if (claim.kind === "slotTaken") return started;
-		if (claim.kind !== "written" || claim.card.state.kind !== "starting") continue;
-		const request = claim.card.state.launch.request;
-		const created = await deps.cursor.createAgent(request);
-		if (created.kind === "created") {
-			const attached = await apply(deps, item.cardId, {
-				type: "agentCreated",
-				launchId: item.launchId,
-				agent: created.agent,
-				cursorStatus: created.cursorStatus,
-			});
-			if (attached.kind === "stale") await deps.cursor.cancelRun(created.agent);
-			else started += 1;
-			continue;
-		}
-		if (created.kind === "rejected") {
-			await apply(deps, item.cardId, {
-				type: "launchFailed",
-				launchId: item.launchId,
-				message: created.message,
-			});
-		}
-	}
-	return started;
-}
-
-async function syncOnce(deps: BoardDeps): Promise<{ observed: number; started: number }> {
-	let observed = 0;
-	const live = (await deps.store.all()).filter((card) => card.state.kind === "queued" || isSlotHolder(card.state));
-	for (const card of live) {
-		if (card.state.kind === "starting" && deps.now() - card.state.claimedAt > START_TIMEOUT_MS) {
-			await apply(deps, card.id, { type: "launchLost", launchId: card.state.launch.id });
-			continue;
-		}
-		if (card.state.kind === "running" || card.state.kind === "stopping") {
-			if (card.state.kind === "stopping") await deps.cursor.cancelRun(card.state.agent);
-			const observation = await deps.cursor.getRun(card.state.agent);
-			if (observation === "unreachable") continue;
-			observed += 1;
-			await apply(deps, card.id, { type: "runObserved", runId: card.state.agent.runId, observation });
-		}
-	}
-	const started = await fillSlots(deps);
-	return { observed, started };
-}
-
-async function settleStop(deps: BoardDeps, card: Card): Promise<void> {
-	if (card.state.kind !== "stopping") return;
-	await deps.cursor.cancelRun(card.state.agent);
-	const observation = await deps.cursor.getRun(card.state.agent);
-	if (observation === "unreachable") return;
-	await apply(deps, card.id, { type: "runObserved", runId: card.state.agent.runId, observation });
-	await fillSlots(deps);
 }
 
 async function viewOf(deps: BoardDeps): Promise<BoardView> {

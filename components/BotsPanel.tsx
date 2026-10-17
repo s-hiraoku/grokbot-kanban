@@ -45,8 +45,7 @@ export default function BotsPanel({
 - 調べた事実、証拠リンク、残る不確実性は add_note でカードに残す。事実と仮説を分ける
 - 新しい依頼や不具合報告は create_card で Inbox に起票する。X の投稿なら externalId に投稿 ID を入れる
 - 別の Bot に渡すときは assign_card の add にその Bot 名を入れ、add_note で引き継ぎ内容を書く
-- 作業が進んだら move_card でカードを動かし、reason に理由を書く（完了は done、見送りは wontDo、着手可能になったら todo）
-- Cursor エージェントの起動と停止はオーナーの承認事項なので、頼まれても行わない。待機中・実行中のカードは動かさない
+- 作業が進んだら move_card でカードを動かし、reason に理由を書く（着手したら inProgress、確認待ちは inReview、完了は done、見送りは wontDo、着手可能になったら todo）
 まだ Routine は作らないでください。`;
 	const iconMessage = `あなたのプロフィール画像を kanban に登録してください。
 1. 下に添付した画像（あなたの Edit Profile のアイコンと同じもの）をファイルに保存する
@@ -176,7 +175,7 @@ export default function BotsPanel({
 						<h3>Endpoint</h3>
 						<CopyBlock text={mcpUrl} />
 						<p className="muted small">
-							Streamable HTTP, stateless, JSON responses. Read tools are marked read-only so Auto-review can let them through. Bots can file, edit, assign, annotate, and move cards between Inbox, Todo, Done, and Won't Do. Starting and stopping Cursor agents stays with you.
+							Streamable HTTP, stateless, JSON responses. Read tools are marked read-only so Auto-review can let them through. Bots can file, edit, assign, annotate, and move cards to any column. Only you can delete a card.
 						</p>
 						<h3>xAI API</h3>
 						<p className="muted small">The same server works as a remote MCP tool in the Responses API. Limit it to read tools when a script only needs to look.</p>

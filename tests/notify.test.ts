@@ -5,14 +5,6 @@ test("a successful command toasts only when the server has something to say", ()
 	expect(commandToast(200, { notice: null })).toBeNull();
 	expect(commandToast(200, { notice: "   " })).toBeNull();
 	expect(commandToast(200, { notice: "Card deleted" })).toEqual({ text: "Card deleted", tone: "success" });
-	expect(commandToast(200, { notice: "Parked in Todo. Set a repo to run it.", tone: "warning" })).toEqual({
-		text: "Parked in Todo. Set a repo to run it.",
-		tone: "warning",
-	});
-	// The board answered, but what it did failed (Cursor refused a launch).
-	expect(commandToast(200, { notice: "Cursor rejected the launch (400): Bad repo", tone: "error" })?.tone).toBe("error");
-	// An unknown tone from the server is never shown louder than it should be.
-	expect(commandToast(200, { notice: "Done", tone: "shout" })?.tone).toBe("success");
 });
 
 test("every failed command shows a red toast, with a reason even when the server sent none", () => {

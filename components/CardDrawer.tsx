@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import AssigneePicker from "@/components/AssigneePicker";
 import { MemberAvatar } from "@/components/Avatar";
 import type { Command } from "@/components/Board";
-import { COLUMNS, type ParkColumn } from "@/lib/domain";
-import { actionBlocked } from "@/lib/dropRules";
+import { COLUMNS, type Column } from "@/lib/domain";
 import type { ToastMessage } from "@/lib/notify";
 import type { CardView, MemberView } from "@/lib/view";
 
@@ -15,7 +14,12 @@ const PRIORITIES = [
 	{ id: "high", label: "High" },
 ] as const;
 
-/** Opens beside the board to read, edit, move, and run one card, or to write a new one. */
+const WIDE_KEY = "kanban.drawer.wide";
+
+/**
+ * Opens beside the board to read, edit, and move one card, or to write a new one. The expand button
+ * widens it into a large centered view with the details in a side column.
+ */
 export default function CardDrawer({
 	card,
 	members,
@@ -44,9 +48,21 @@ export default function CardDrawer({
 	const [assignees, setAssignees] = useState<string[]>(card?.assignees.map((member) => member.id) ?? []);
 	const [screened, setScreened] = useState(card?.screened ?? false);
 	const [reviewer, setReviewer] = useState(card?.reviewer === "grok" ? "grok" : "owner");
+	// Existing text opens as reading copy; a new card, or a card with nothing written yet, opens for typing.
+	const [editingBody, setEditingBody] = useState(!card?.body);
+	const [editingNotes, setEditingNotes] = useState(false);
+	const [wide, setWide] = useState(false);
 	const [busy, setBusy] = useState(false);
-	const first = useRef<HTMLInputElement>(null);
+	const first = useRef<HTMLTextAreaElement>(null);
 	const panel = useRef<HTMLFormElement>(null);
+
+	useEffect(() => {
+		try {
+			setWide(window.localStorage.getItem(WIDE_KEY) === "1");
+		} catch {
+			// Storage is off. The drawer opens narrow.
+		}
+	}, []);
 
 	useEffect(() => {
 		if (!card) first.current?.focus();
@@ -60,6 +76,16 @@ export default function CardDrawer({
 		// Focus once on open, not on every board refresh.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [onClose]);
+
+	const toggleWide = () =>
+		setWide((current) => {
+			try {
+				window.localStorage.setItem(WIDE_KEY, current ? "0" : "1");
+			} catch {
+				// Storage is off. The size holds until the drawer closes.
+			}
+			return !current;
+		});
 
 	const content = () => ({
 		title: title.trim(),
@@ -91,17 +117,42 @@ export default function CardDrawer({
 		return patch;
 	};
 	const dirty = card ? Object.keys(changes()).length > 0 : title.trim().length > 0;
-	const columnLabel = (id: string) => COLUMNS.find((column) => column.id === id)?.label ?? id;
+
+	const remove = async () => {
+		if (!card || !window.confirm(`Delete “${card.title}”? This cannot be undone.`)) return;
+		setBusy(true);
+		const ok = await send({ type: "deleteCard", cardId: card.id });
+		setBusy(false);
+		if (ok) onClose();
+	};
+
+	const copyLink = async () => {
+		if (!card) return;
+		const url = `${window.location.origin}/?card=${card.id}`;
+		try {
+			await navigator.clipboard.writeText(url);
+			notify({ text: "Link copied", tone: "success" });
+		} catch {
+			notify({ text: `Could not copy. The link is ${url}`, tone: "warning" });
+		}
+	};
 
 	return (
-		<div className="drawer-scrim" onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
+		<div className={`drawer-scrim${wide ? " wide" : ""}`} onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
 			<form
 				ref={panel}
 				tabIndex={-1}
-				className="drawer"
+				className={`drawer${wide ? " wide" : ""}`}
 				role="dialog"
 				aria-modal="true"
 				aria-label={card ? `Card ${card.title}` : "New card"}
+				onKeyDown={(event) => {
+					// Cmd or Ctrl + Enter saves from any field.
+					if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+						event.preventDefault();
+						event.currentTarget.requestSubmit();
+					}
+				}}
 				onSubmit={async (event) => {
 					event.preventDefault();
 					if (!dirty) {
@@ -115,190 +166,486 @@ export default function CardDrawer({
 			>
 				<header className="drawer-head">
 					{card ? (
-						<span className={`stage col-${card.column}`}>
-							<span className="lamp" aria-hidden="true" />
-							{columnLabel(card.column)}
-						</span>
+						<StatusMenu column={card.column} onMove={(to) => void send({ type: "move", cardId: card.id, to })} />
 					) : (
-						<span className="stage col-inbox">
+						<span className="status-button static col-inbox">
 							<span className="lamp" aria-hidden="true" />
 							New card for Inbox
 						</span>
 					)}
 					{card ? <span className="card-id">#{card.shortId}</span> : null}
-					<button type="button" className="icon" aria-label="Close" onClick={onClose}>
-						×
-					</button>
+					<span className="drawer-tools">
+						<button type="button" className="icon" aria-label={wide ? "Show as side panel" : "Open in a large view"} aria-pressed={wide} title={wide ? "Side panel" : "Large view"} onClick={toggleWide}>
+							<svg viewBox="0 0 16 16" aria-hidden="true">
+								{wide ? <path d="M6.5 2v4.5H2M9.5 14V9.5H14M6.5 6.5 2 2m7.5 7.5L14 14" /> : <path d="M2 6.5V2h4.5M14 9.5V14H9.5M2 2l4.5 4.5M14 14 9.5 9.5" />}
+							</svg>
+						</button>
+						{card ? (
+							<Menu label="More actions" icon={<DotsIcon />}>
+								{(close) => (
+									<>
+										<button
+											type="button"
+											role="menuitem"
+											onClick={() => {
+												close();
+												void copyLink();
+											}}
+										>
+											Copy link
+										</button>
+										<button
+											type="button"
+											role="menuitem"
+											className="danger-item"
+											disabled={busy}
+											onClick={() => {
+												close();
+												void remove();
+											}}
+										>
+											Delete card
+										</button>
+									</>
+								)}
+							</Menu>
+						) : null}
+						<button type="button" className="icon" aria-label="Close" onClick={onClose}>
+							×
+						</button>
+					</span>
 				</header>
 
 				<div className="drawer-body">
-					<label className="title-field">
-						<span className="visually-hidden">Title</span>
-						<input ref={first} value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={200} lang="ja" placeholder="What needs doing?" />
-					</label>
-					{card ? (
-						<p className="filed-line">
-							{card.createdBy ? <MemberAvatar member={card.createdBy} size={20} /> : null}
-							<span>
-								Filed by {card.createdBy?.name ?? "the API"}, {card.age === "just now" ? "just now" : `${card.age} ago`}
-							</span>
-						</p>
-					) : null}
+					<div className="drawer-main">
+						<label className="title-field">
+							<span className="visually-hidden">Title</span>
+							<GrowingText
+								inputRef={first}
+								value={title}
+								onChange={setTitle}
+								required
+								maxLength={200}
+								placeholder="What needs doing?"
+								onEnter={() => panel.current?.requestSubmit()}
+							/>
+						</label>
+						{card ? (
+							<p className="filed-line">
+								{card.createdBy ? <MemberAvatar member={card.createdBy} size={20} /> : null}
+								<span>
+									Filed by {card.createdBy?.name ?? "the API"}, {card.age === "just now" ? "just now" : `${card.age} ago`}
+								</span>
+							</p>
+						) : null}
 
-					{card ? (
-						<section className="run-box" aria-label="Status">
-							{card.hint ? <p className="hint">{card.hint}</p> : null}
-							{card.failure ? <p className="failure">{card.failure}</p> : null}
-							<div className="run-row">
-								{card.action.command === "stop" || card.repo ? (
-									<button
-										type="button"
-										className={`run-button ${card.action.command}`}
-										aria-disabled={!card.action.enabled || undefined}
-										onClick={() => {
-											const reason = actionBlocked(card, card.action.command);
-											if (reason) notify({ text: reason, tone: "warning" });
-											else void send({ type: card.action.command, cardId: card.id });
-										}}
-									>
-										{card.action.command === "stop" ? "Stop agent" : card.action.label === "Re-run" ? "Re-run agent" : "Run agent"}
+						<section className="text-block" aria-labelledby="details-label">
+							<div className="block-head">
+								<h3 id="details-label">Details</h3>
+								{body && !editingBody ? (
+									<button type="button" className="ghost small" onClick={() => setEditingBody(true)}>
+										Edit
 									</button>
-								) : (
-									<p className="muted small">Add a repo below to run a Cursor agent.</p>
-								)}
-								{card.links.agent ? (
-									<a href={card.links.agent} target="_blank" rel="noreferrer">
-										Open agent
-									</a>
-								) : null}
-								{card.links.pr ? (
-									<a href={card.links.pr} target="_blank" rel="noreferrer">
-										Open PR
-									</a>
 								) : null}
 							</div>
-							{card.moveTargets.filter((target) => target !== card.column).length ? (
-								<div className="move-row">
-									<span className="muted small">Move to</span>
-									{card.moveTargets
-										.filter((target) => target !== card.column)
-										.map((target: ParkColumn) => (
-											<button key={target} type="button" className={`move col-${target}`} onClick={() => void send({ type: "move", cardId: card.id, to: target })}>
-												<span className="lamp" aria-hidden="true" />
-												{columnLabel(target)}
-											</button>
-										))}
+							{editingBody ? (
+								<GrowingText value={body} onChange={setBody} className="body-input" minRows={wide ? 10 : 6} placeholder="What the bot reported, steps, context" autoFocus={Boolean(card)} />
+							) : (
+								<div className="prose" lang="ja" onDoubleClick={() => setEditingBody(true)}>
+									<Prose text={body} />
 								</div>
-							) : null}
+							)}
 						</section>
-					) : null}
 
-					<div className="field assign-field">
-						<AssigneePicker members={members} selected={assignees} onChange={setAssignees} />
-						{members.length <= 1 ? <p className="muted small">Bots appear here once they use the board, or add one under Bots & MCP.</p> : null}
+						<section className="text-block" aria-labelledby="notes-label">
+							<div className="block-head">
+								<h3 id="notes-label">Notes</h3>
+								{!editingNotes ? (
+									<button type="button" className="ghost small" onClick={() => setEditingNotes(true)}>
+										{notes ? "Edit" : "Add note"}
+									</button>
+								) : null}
+							</div>
+							{editingNotes ? (
+								<GrowingText value={notes} onChange={setNotes} className="notes-input" minRows={5} placeholder="Bots sign their notes here" autoFocus />
+							) : notes ? (
+								<NotesLog notes={notes} />
+							) : (
+								<p className="muted small">No notes yet.</p>
+							)}
+						</section>
 					</div>
 
-					<label className="field">
-						<span>Details</span>
-						<textarea value={body} onChange={(event) => setBody(event.target.value)} rows={6} lang="ja" placeholder="What the bot reported, steps, context" />
-					</label>
-
-					<fieldset className="field">
-						<legend>Priority</legend>
-						<div className="segmented" role="radiogroup" aria-label="Priority">
-							{PRIORITIES.map((item) => (
-								<button key={item.id} type="button" role="radio" aria-checked={priority === item.id} className={priority === item.id ? `on p-${item.id}` : ""} onClick={() => setPriority(item.id)}>
-									{item.label}
-								</button>
-							))}
+					<aside className="drawer-side" aria-label="Card details">
+						<div className="side-group">
+							<AssigneePicker members={members} selected={assignees} onChange={setAssignees} />
+							{members.length <= 1 ? <p className="muted small">Bots appear here once they use the board, or add one under Bots & MCP.</p> : null}
 						</div>
-					</fieldset>
 
-					<div className="field-grid">
-						<label className="field wide">
-							<span>Repo</span>
-							<input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="https://github.com/org/repo" inputMode="url" />
-						</label>
-						<label className="field">
-							<span>Branch</span>
-							<input value={ref} onChange={(event) => setRef(event.target.value)} placeholder="main" />
-						</label>
-						<label className="field">
-							<span>Source</span>
-							<input value={source} onChange={(event) => setSource(event.target.value)} placeholder="x, slack" />
-						</label>
-						<label className="field wide">
-							<span>Original post</span>
-							<input value={originalLink} onChange={(event) => setOriginalLink(event.target.value)} placeholder="https://" inputMode="url" />
-						</label>
-						<label className="field">
-							<span>Kind</span>
-							<select value={kind} onChange={(event) => setKind(event.target.value)}>
-								<option value="text">Text</option>
-								<option value="voice">Voice</option>
-							</select>
-						</label>
-						{kind === "voice" ? (
-							<label className="field">
-								<span>Seconds</span>
-								<input value={seconds} onChange={(event) => setSeconds(event.target.value)} inputMode="numeric" />
-							</label>
-						) : null}
-					</div>
-					{originalLink && /^https:\/\//.test(originalLink) ? (
-						<a className="small-link" href={originalLink} target="_blank" rel="noreferrer">
-							Open the original post
-						</a>
-					) : null}
+						<fieldset className="side-group field">
+							<legend>Priority</legend>
+							<div className="segmented" role="radiogroup" aria-label="Priority">
+								{PRIORITIES.map((item) => (
+									<button key={item.id} type="button" role="radio" aria-checked={priority === item.id} className={priority === item.id ? `on p-${item.id}` : ""} onClick={() => setPriority(item.id)}>
+										{item.label}
+									</button>
+								))}
+							</div>
+						</fieldset>
 
-					<label className="field">
-						<span>Notes</span>
-						<textarea className="notes-area" value={notes} onChange={(event) => setNotes(event.target.value)} rows={6} lang="ja" placeholder="Bots sign their notes here" />
-					</label>
-					<div className="screen-row">
-						<label className="check">
-							<input type="checkbox" checked={screened} onChange={(event) => setScreened(event.target.checked)} />
-							Screened for moderation
-						</label>
-						{screened ? (
-							<select aria-label="Screened by" value={reviewer} onChange={(event) => setReviewer(event.target.value)}>
-								<option value="owner">by you</option>
-								<option value="grok">by Grok</option>
-							</select>
+						{card && (card.links.pr || card.links.agent || card.originalLink) ? (
+							<div className="side-group">
+								<p className="side-label">Links</p>
+								<ul className="link-list">
+									{card.links.pr ? (
+										<li>
+											<a href={card.links.pr} target="_blank" rel="noreferrer">
+												Pull request
+											</a>
+										</li>
+									) : null}
+									{card.originalLink ? (
+										<li>
+											<a href={card.originalLink} target="_blank" rel="noreferrer">
+												Original post
+											</a>
+										</li>
+									) : null}
+									{card.links.agent ? (
+										<li>
+											<a href={card.links.agent} target="_blank" rel="noreferrer">
+												Past Cursor agent
+											</a>
+										</li>
+									) : null}
+								</ul>
+							</div>
 						) : null}
-					</div>
+
+						<details className="side-group more-fields" open={!card || wide}>
+							<summary>More fields</summary>
+							<div className="field-grid">
+								<label className="field wide">
+									<span>Repo</span>
+									<input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="https://github.com/org/repo" inputMode="url" />
+								</label>
+								<label className="field">
+									<span>Branch</span>
+									<input value={ref} onChange={(event) => setRef(event.target.value)} placeholder="main" />
+								</label>
+								<label className="field">
+									<span>Source</span>
+									<input value={source} onChange={(event) => setSource(event.target.value)} placeholder="x, slack" />
+								</label>
+								<label className="field wide">
+									<span>Original post</span>
+									<input value={originalLink} onChange={(event) => setOriginalLink(event.target.value)} placeholder="https://" inputMode="url" />
+								</label>
+								<label className="field">
+									<span>Kind</span>
+									<select value={kind} onChange={(event) => setKind(event.target.value)}>
+										<option value="text">Text</option>
+										<option value="voice">Voice</option>
+									</select>
+								</label>
+								{kind === "voice" ? (
+									<label className="field">
+										<span>Seconds</span>
+										<input value={seconds} onChange={(event) => setSeconds(event.target.value)} inputMode="numeric" />
+									</label>
+								) : null}
+							</div>
+							<div className="screen-row">
+								<label className="check">
+									<input type="checkbox" checked={screened} onChange={(event) => setScreened(event.target.checked)} />
+									Screened for moderation
+								</label>
+								{screened ? (
+									<select aria-label="Screened by" value={reviewer} onChange={(event) => setReviewer(event.target.value)}>
+										<option value="owner">by you</option>
+										<option value="grok">by Grok</option>
+									</select>
+								) : null}
+							</div>
+						</details>
+					</aside>
 				</div>
 
 				<footer className="drawer-foot">
-					<button type="submit" className="primary" disabled={busy || !title.trim() || (card !== null && !dirty)}>
-						{card ? "Save changes" : "Add to Inbox"}
-					</button>
-					<button type="button" className="ghost" onClick={onClose}>
-						{card && !dirty ? "Close" : "Cancel"}
-					</button>
-					{card && (card.pill !== null || card.links.agent !== null) ? <span className="muted small">Edits do not change a run already started.</span> : null}
-					{card ? (
-						<button
-							type="button"
-							className="ghost danger delete"
-							disabled={busy}
-							aria-disabled={card.pill !== null || undefined}
-							title={card.pill ? "Stop the agent before deleting this card." : "Delete this card"}
-							onClick={async () => {
-								const reason = actionBlocked(card, "delete");
-								if (reason) return notify({ text: reason, tone: "warning" });
-								if (!window.confirm(`Delete “${card.title}”? This cannot be undone.`)) return;
-								setBusy(true);
-								const ok = await send({ type: "deleteCard", cardId: card.id });
-								setBusy(false);
-								if (ok) onClose();
-							}}
-						>
-							Delete
+					{card && !dirty ? <span className="muted small">No unsaved changes</span> : <span className="muted small">{card ? "Unsaved changes" : "Lands in Inbox"} · ⌘ Enter to save</span>}
+					<span className="foot-actions">
+						<button type="button" className="ghost" onClick={onClose}>
+							{card && !dirty ? "Close" : "Cancel"}
 						</button>
-					) : null}
+						<button type="submit" className="primary" disabled={busy || !title.trim() || (card !== null && !dirty)}>
+							{card ? "Save changes" : "Add to Inbox"}
+						</button>
+					</span>
 				</footer>
 			</form>
 		</div>
+	);
+}
+
+/** The card's column as a button that opens a menu of the other columns, like an issue's status. */
+function StatusMenu({ column, onMove }: { column: Column; onMove: (to: Column) => void }) {
+	const label = COLUMNS.find((item) => item.id === column)?.label ?? column;
+	return (
+		<Menu
+			label={`Status: ${label}. Move to another column`}
+			className={`status-button col-${column}`}
+			align="left"
+			icon={
+				<>
+					<span className="lamp" aria-hidden="true" />
+					<span>{label}</span>
+					<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
+						<path d="M1 1l4 4 4-4" />
+					</svg>
+				</>
+			}
+		>
+			{(close) => (
+				<>
+					<p className="menu-title">Move to</p>
+					{COLUMNS.map((item) => (
+						<button
+							key={item.id}
+							type="button"
+							role="menuitemradio"
+							aria-checked={item.id === column}
+							className={`col-${item.id}${item.id === column ? " current" : ""}`}
+							onClick={() => {
+								close();
+								if (item.id !== column) onMove(item.id);
+							}}
+						>
+							<span className="lamp" aria-hidden="true" />
+							{item.label}
+							{item.id === column ? <span className="menu-check" aria-hidden="true">✓</span> : null}
+						</button>
+					))}
+				</>
+			)}
+		</Menu>
+	);
+}
+
+/** A button with a dropdown menu that closes on an outside click or Escape. */
+function Menu({
+	label,
+	icon,
+	className = "icon",
+	align = "right",
+	children,
+}: {
+	label: string;
+	icon: ReactNode;
+	className?: string;
+	align?: "left" | "right";
+	children: (close: () => void) => ReactNode;
+}) {
+	const [open, setOpen] = useState(false);
+	const box = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!open) return;
+		box.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]')?.focus();
+		const outside = (event: PointerEvent) => {
+			if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
+		};
+		const escape = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			// Close the menu only, not the drawer around it.
+			event.preventDefault();
+			setOpen(false);
+			box.current?.querySelector<HTMLButtonElement>("button")?.focus();
+		};
+		document.addEventListener("pointerdown", outside);
+		document.addEventListener("keydown", escape, true);
+		return () => {
+			document.removeEventListener("pointerdown", outside);
+			document.removeEventListener("keydown", escape, true);
+		};
+	}, [open]);
+	return (
+		<div className="menu-anchor" ref={box}>
+			<button type="button" className={className} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+				{icon}
+			</button>
+			{open ? (
+				<div
+					className={`menu ${align}`}
+					role="menu"
+					onKeyDown={(event) => {
+						if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+						event.preventDefault();
+						const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)'));
+						const at = items.indexOf(document.activeElement as HTMLButtonElement);
+						items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+					}}
+				>
+					{children(() => setOpen(false))}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function DotsIcon() {
+	return (
+		<svg viewBox="0 0 16 4" aria-hidden="true" className="dots">
+			<circle cx="2" cy="2" r="1.6" />
+			<circle cx="8" cy="2" r="1.6" />
+			<circle cx="14" cy="2" r="1.6" />
+		</svg>
+	);
+}
+
+/** A textarea that grows with its text, so long titles and details never hide behind a scrollbar. */
+function GrowingText({
+	value,
+	onChange,
+	inputRef,
+	className,
+	minRows = 1,
+	onEnter,
+	...rest
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	inputRef?: RefObject<HTMLTextAreaElement | null>;
+	className?: string;
+	minRows?: number;
+	/** When set, Enter calls it instead of adding a line, as a title field should. */
+	onEnter?: () => void;
+	required?: boolean;
+	maxLength?: number;
+	placeholder?: string;
+	autoFocus?: boolean;
+}) {
+	const own = useRef<HTMLTextAreaElement>(null);
+	const node = inputRef ?? own;
+	useLayoutEffect(() => {
+		const element = node.current;
+		if (!element) return;
+		element.style.height = "auto";
+		element.style.height = `${element.scrollHeight + 2}px`;
+	}, [value, node]);
+	return (
+		<textarea
+			ref={node}
+			className={className}
+			value={value}
+			rows={minRows}
+			lang="ja"
+			onChange={(event) => onChange(onEnter ? event.target.value.replace(/\n/g, " ") : event.target.value)}
+			onKeyDown={(event) => {
+				if (onEnter && event.key === "Enter" && !event.nativeEvent.isComposing && !event.metaKey && !event.ctrlKey) {
+					event.preventDefault();
+					onEnter();
+				}
+			}}
+			{...rest}
+		/>
+	);
+}
+
+/**
+ * Card text as reading copy: blank lines split paragraphs, "#" lines become headings, runs of "-" lines
+ * become lists, and URLs become links. Everything else stays as written, line breaks included.
+ */
+function Prose({ text }: { text: string }) {
+	if (!text.trim()) return <p className="muted">No details yet. Double-click or press Edit to add them.</p>;
+	const out: ReactNode[] = [];
+	let lines: string[] = [];
+	let items: string[] = [];
+	const flush = () => {
+		if (lines.length) {
+			const kept = lines;
+			out.push(
+				<p key={out.length}>
+					{kept.map((line, at) => (
+						<Fragment key={at}>
+							{at > 0 ? <br /> : null}
+							{linkify(line)}
+						</Fragment>
+					))}
+				</p>,
+			);
+		}
+		if (items.length) {
+			out.push(
+				<ul key={out.length}>
+					{items.map((item, at) => (
+						<li key={at}>{linkify(item)}</li>
+					))}
+				</ul>,
+			);
+		}
+		lines = [];
+		items = [];
+	};
+	for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+		const heading = /^#{1,6}\s+(.*)$/.exec(line);
+		const item = /^\s*[-*・]\s+(.*)$/.exec(line);
+		if (!line.trim()) flush();
+		else if (heading) {
+			flush();
+			out.push(<h4 key={out.length}>{linkify(heading[1] ?? "")}</h4>);
+		} else if (item) {
+			if (lines.length) flush();
+			items.push(item[1] ?? "");
+		} else {
+			if (items.length) flush();
+			lines.push(line);
+		}
+	}
+	flush();
+	return <>{out}</>;
+}
+
+/** Notes as a log. Lines signed "[YYYY-MM-DD HH:MM Name]" become entries; other lines join the entry above. */
+function NotesLog({ notes }: { notes: string }) {
+	const entries: { stamp: string | null; author: string | null; lines: string[] }[] = [];
+	for (const line of notes.split("\n")) {
+		const signed = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) ([^\]]+)\]\s?(.*)$/.exec(line);
+		if (signed) entries.push({ stamp: signed[1] ?? null, author: signed[2] ?? null, lines: [signed[3] ?? ""] });
+		else if (entries.length) entries[entries.length - 1]?.lines.push(line);
+		else entries.push({ stamp: null, author: null, lines: [line] });
+	}
+	return (
+		<ol className="notes-log" lang="ja">
+			{entries.map((entry, index) => (
+				<li key={index}>
+					{entry.author ? (
+						<p className="note-meta">
+							<strong>{entry.author}</strong>
+							<time>{entry.stamp}</time>
+						</p>
+					) : null}
+					<p className="note-text">
+						{entry.lines.map((line, at) => (
+							<Fragment key={at}>
+								{at > 0 ? <br /> : null}
+								{linkify(line)}
+							</Fragment>
+						))}
+					</p>
+				</li>
+			))}
+		</ol>
+	);
+}
+
+function linkify(line: string): ReactNode[] {
+	const parts = line.split(/(https?:\/\/[^\s<>"'）」]+)/g);
+	return parts.map((part, index) =>
+		/^https?:\/\//.test(part) ? (
+			<a key={index} href={part} target="_blank" rel="noreferrer">
+				{part}
+			</a>
+		) : (
+			<Fragment key={index}>{part}</Fragment>
+		),
 	);
 }

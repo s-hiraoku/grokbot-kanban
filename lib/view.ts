@@ -1,29 +1,7 @@
 import type { BotProfile } from "./bots";
-import {
-	COLUMNS,
-	OWNER_MEMBER,
-	LAUNCH_UNCONFIRMED_MESSAGE,
-	MAX_RUNNING,
-	QUEUE_HINT,
-	QUEUE_TOAST,
-	actionFor,
-	agentHref,
-	columnOf,
-	failureMessage,
-	isSlotHolder,
-	moveTargetsFor,
-	prHref,
-	type Card,
-	type CardId,
-	type CardState,
-	type Column,
-	type MemberId,
-	type ParkColumn,
-	type Rejection,
-} from "./domain";
+import { COLUMNS, OWNER_MEMBER, agentHref, columnOf, prHref, type Card, type CardId, type Column, type MemberId } from "./domain";
 
 export type BoardView = {
-	agents: { running: number; queued: number; capacity: number };
 	columns: readonly ColumnView[];
 	bots: readonly BotView[];
 	owner: { avatar: string };
@@ -54,8 +32,6 @@ export type ColumnView = {
 	cards: readonly CardView[];
 };
 
-export type Pill = { label: "queued" | "running"; tone: "yellow" | "spinner" };
-
 export type CardView = {
 	id: CardId;
 	shortId: string;
@@ -68,8 +44,6 @@ export type CardView = {
 	priority: string;
 	source: string | null;
 	repoLabel: string | null;
-	pill: Pill | null;
-	hint: string | null;
 	screening: string | null;
 	screened: boolean;
 	reviewer: string | null;
@@ -79,16 +53,12 @@ export type CardView = {
 	originalLink: string | null;
 	kind: { type: "text" } | { type: "voice"; seconds: number };
 	links: { character: string | null; agent: string | null; pr: string | null };
-	failure: string | null;
-	action: { label: "Run" | "Re-run" | "Stop"; command: "run" | "stop"; enabled: boolean };
-	moveTargets: readonly ParkColumn[];
 };
 
 export type BotCardView = {
 	id: CardId;
 	shortId: string;
 	column: Column;
-	status: CardState["kind"];
 	createdAt: string;
 	title: string;
 	body: string;
@@ -105,15 +75,7 @@ export type BotCardView = {
 	prUrl: string | null;
 };
 
-export type CommandOutcome =
-	| { kind: "rejected"; reason: Rejection }
-	| { kind: "unchanged"; state: CardState }
-	| { kind: "settled"; command: "move" | "run" | "stop" | "create" | "edit" | "drop"; state: CardState }
-	| { kind: "missing" };
-
 export function toBoardView(cards: readonly Card[], bots: readonly BotProfile[], now: number): BoardView {
-	const running = cards.filter((card) => isSlotHolder(card.state)).length;
-	const queued = cards.filter((card) => card.state.kind === "queued").length;
 	const columns = COLUMNS.map((column) => {
 		const inColumn = cards
 			.filter((card) => columnOf(card.state) === column.id)
@@ -127,7 +89,6 @@ export function toBoardView(cards: readonly Card[], bots: readonly BotProfile[],
 		};
 	});
 	return {
-		agents: { running, queued, capacity: MAX_RUNNING },
 		columns,
 		bots: bots.filter((bot) => bot.id !== OWNER_MEMBER).map((bot) => toBotView(bot, cards, now)),
 		owner: { avatar: ownerAvatarUrl(bots) },
@@ -195,8 +156,6 @@ export function toCardView(card: Card, bots: readonly BotProfile[], now: number)
 		priority: card.content.priority,
 		source: card.content.source,
 		repoLabel: repoLabel(card.content.repo?.url ?? null),
-		pill: pillFor(card.state),
-		hint: card.state.kind === "queued" ? QUEUE_HINT : null,
 		screening,
 		screened: card.content.screening !== null,
 		reviewer: card.content.screening?.by ?? null,
@@ -210,9 +169,6 @@ export function toCardView(card: Card, bots: readonly BotProfile[], now: number)
 			agent: agentHref(card.state),
 			pr: prHref(card.state),
 		},
-		failure: failureMessage(card.state),
-		action: actionFor(card.state),
-		moveTargets: moveTargetsFor(card.state),
 	};
 }
 
@@ -221,7 +177,6 @@ export function toBotCard(card: Card, bots: readonly BotProfile[]): BotCardView 
 		id: card.id,
 		shortId: card.id.replaceAll("-", "").slice(0, 6),
 		column: columnOf(card.state),
-		status: card.state.kind,
 		createdAt: new Date(card.createdAt).toISOString(),
 		title: card.content.title,
 		body: card.content.body,
@@ -239,37 +194,6 @@ export function toBotCard(card: Card, bots: readonly BotProfile[]): BotCardView 
 		agentUrl: agentHref(card.state),
 		prUrl: prHref(card.state),
 	};
-}
-
-export function noticeFor(outcome: CommandOutcome): string | null {
-	if (outcome.kind === "missing") return null;
-	if (outcome.kind === "rejected") {
-		if (outcome.reason === "noRepo") return "Set a repo before running.";
-		if (outcome.reason === "activeRun") return "Stop the agent before moving this card.";
-		return "The agent is starting. Try again in a moment.";
-	}
-	const state = outcome.state;
-	if (outcome.kind === "settled" && outcome.command === "run") {
-		if (state.kind === "queued") return QUEUE_TOAST;
-		if (state.kind === "starting") return LAUNCH_UNCONFIRMED_MESSAGE;
-		if (state.kind === "running") return "Agent started";
-	}
-	if (outcome.kind === "settled" && outcome.command === "stop" && state.kind === "idle") {
-		return "Removed from the queue.";
-	}
-	if (outcome.kind === "settled" && outcome.command === "stop" && state.kind === "stopping") {
-		return "Stopping agent";
-	}
-	if (outcome.kind === "settled" && outcome.command === "create") return "Card added";
-	return null;
-}
-
-function pillFor(state: CardState): Pill | null {
-	if (state.kind === "queued") return { label: "queued", tone: "yellow" };
-	if (state.kind === "starting" || state.kind === "running" || state.kind === "stopping") {
-		return { label: "running", tone: "spinner" };
-	}
-	return null;
 }
 
 function screeningLabel(screening: { by: string | null } | null): string | null {

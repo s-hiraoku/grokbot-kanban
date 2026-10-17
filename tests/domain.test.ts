@@ -1,66 +1,22 @@
 import { expect, test } from "vitest";
-import { columnOf, moveTargetsFor, transition, type Card, type CardId, type HttpsUrl, type Instant } from "@/lib/domain";
+import { columnOf, moved, type PastRun } from "@/lib/domain";
+import { readState } from "@/lib/store";
 
-const repo = { url: "https://github.com/s-hiraoku/grokbot" as HttpsUrl, startingRef: "main" };
-
-function card(state: Card["state"]): Card {
-	return {
-		id: "11111111-1111-4111-8111-111111111111" as CardId,
-		createdAt: 0 as Instant,
-		createdBy: null,
-		rank: "0000000000001000",
-		version: 0,
-		content: {
-			title: "件名",
-			body: "本文",
-			notes: "",
-			repo,
-			source: null,
-			originalLink: null,
-			priority: "normal",
-			kind: { type: "text" },
-			screening: null,
-			assignees: [],
-		},
-		state,
-	};
-}
-
-const ctx = { now: 10 as Instant, freshLaunchId: "launch-1" as never };
-
-test("moving a card to Todo parks it and does not queue a run", () => {
-	const next = transition(card({ kind: "idle", column: "inbox", last: null }), { type: "move", to: "todo" }, ctx);
-	expect(next).toEqual({ kind: "changed", state: { kind: "idle", column: "todo", last: null } });
+test("a move changes only the column and keeps an old run's links", () => {
+	const last = { kind: "ended", launchId: "l", endedAt: 1, agent: { agentId: "a", runId: "r", url: "https://cursor.com/agents/a" }, outcome: "finished", prUrl: null } as unknown as PastRun;
+	expect(moved({ kind: "idle", column: "inbox", last: null }, "inProgress")).toEqual({ kind: "idle", column: "inProgress", last: null });
+	expect(moved({ kind: "idle", column: "todo", last }, "done")).toEqual({ kind: "idle", column: "done", last });
+	expect(moved({ kind: "idle", column: "todo", last: null }, "todo")).toBeNull();
 });
 
-test("run queues a frozen prompt", () => {
-	const next = transition(card({ kind: "idle", column: "inbox", last: null }), { type: "run" }, ctx);
-	expect(next.kind).toBe("changed");
-	if (next.kind !== "changed" || next.state.kind !== "queued") throw new Error("expected queued");
-	expect(next.state.launch.request.promptText).toBe("# 件名\n\n本文");
-	expect(next.state.launch.request.repo).toEqual(repo);
-});
-
-test("a card can be parked by hand in In Progress and In Review", () => {
-	for (const to of ["inProgress", "inReview"] as const) {
-		const next = transition(card({ kind: "idle", column: "inbox", last: null }), { type: "move", to }, ctx);
-		expect(next).toEqual({ kind: "changed", state: { kind: "idle", column: to, last: null } });
-	}
-});
-
-test("every column is a move target unless an agent holds a slot", () => {
-	expect(moveTargetsFor({ kind: "idle", column: "inProgress", last: null })).toEqual(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]);
-	const slot = { launch: { id: "l" as never, requestedAt: 0 as Instant, request: { promptText: "", repo } }, slot: 1 as never, claimedAt: 0 as Instant };
-	expect(moveTargetsFor({ kind: "starting", ...slot })).toEqual([]);
-	const moved = transition(card({ kind: "starting", ...slot }), { type: "move", to: "inReview" }, ctx);
-	expect(moved).toEqual({ kind: "rejected", reason: "activeRun" });
-});
-
-test("a hand-parked In Progress card still runs, and its column comes from the run", () => {
-	const parked = card({ kind: "idle", column: "inProgress", last: null });
-	expect(columnOf(parked.state)).toBe("inProgress");
-	const next = transition(parked, { type: "run" }, ctx);
-	if (next.kind !== "changed") throw new Error("expected a queued run");
-	expect(next.state.kind).toBe("queued");
-	expect(columnOf(next.state)).toBe("todo");
+test("states written for Cursor runs read back in the column they showed in", () => {
+	const launch = { id: "l", requestedAt: 0, request: { promptText: "", repo: { url: "https://github.com/a/b", startingRef: "main" } } };
+	const agent = { agentId: "a", runId: "r", url: "https://cursor.com/agents/a" };
+	expect(columnOf(readState({ kind: "queued", launch, last: { kind: "launchFailed", launchId: "l", endedAt: 1, message: "no" } }))).toBe("todo");
+	expect(readState({ kind: "starting", launch, slot: 1, claimedAt: 0 })).toEqual({ kind: "idle", column: "inProgress", last: null });
+	expect(columnOf(readState({ kind: "stopping", launch, slot: 2, agent, requestedAt: 0 }))).toBe("inProgress");
+	const run = { kind: "ended", launchId: "l", endedAt: 1, agent, outcome: "finished", prUrl: "https://github.com/a/b/pull/1" };
+	expect(readState({ kind: "review", run })).toEqual({ kind: "idle", column: "inReview", last: run });
+	expect(readState({ kind: "idle", column: "done", last: { kind: "launchLost", launchId: "l", endedAt: 1 } })).toEqual({ kind: "idle", column: "done", last: null });
+	expect(() => readState({ kind: "mystery" })).toThrow();
 });
