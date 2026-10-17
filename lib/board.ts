@@ -4,6 +4,7 @@ import { DEFAULT_OWNER_AVATAR } from "./ownerAvatar";
 import {
 	COLUMNS,
 	OWNER_MEMBER,
+	RUNNABLE,
 	columnOf,
 	moved,
 	nextRank,
@@ -493,13 +494,14 @@ async function requestRun(deps: BoardDeps, cardId: CardId, botId: string | null)
 	const bot = botId ? roster.find((item) => item.id === botId) : roster.find((item) => card.content.assignees.includes(item.id));
 	if (!bot) throw new BoardInputError(botId ? "That bot is not on the roster." : "Assign a Grok Bot to this card first, then run it.");
 	const current = card.state.botRun;
+	if (!current && !RUNNABLE.includes(card.state.column)) throw new BoardInputError("Run works on cards in Inbox, Todo, or In Progress. Move the card back to Todo to run it again.");
 	if (current) {
 		const holder = roster.find((item) => item.id === current.bot)?.name ?? current.bot;
 		throw new BoardInputError(`${holder} already has a run for this card. Cancel it first.`);
 	}
 	const at = deps.now();
 	const applied = await changeState(deps, card.id, (state) =>
-		state.botRun ? null : { ...state, column: "todo", botRun: { bot: bot.id, status: "requested", requestedAt: at, startedAt: null } },
+		state.botRun ? null : { ...state, column: "inProgress", botRun: { bot: bot.id, status: "requested", requestedAt: at, startedAt: null } },
 	);
 	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
 	if (applied.kind !== "written") return { board: await viewOf(deps), notice: null, error: "busy" };
@@ -515,7 +517,10 @@ async function cancelRun(deps: BoardDeps, cardId: CardId): Promise<CommandResult
 	const card = await deps.store.get(cardId);
 	if (!card) return { board: await viewOf(deps), notice: null, error: "not_found" };
 	if (!card.state.botRun) return { board: await viewOf(deps), notice: null, error: null };
-	const applied = await changeState(deps, card.id, (state) => (state.botRun ? { ...state, botRun: null } : null));
+	// A request no Bot has picked up goes back to Todo; work already under way stays where it is.
+	const applied = await changeState(deps, card.id, (state) =>
+		state.botRun ? { ...state, column: state.botRun.status === "requested" ? "todo" : state.column, botRun: null } : null,
+	);
 	if (applied.kind === "missing") return { board: await viewOf(deps), notice: null, error: "not_found" };
 	if (applied.kind === "conflict") return { board: await viewOf(deps), notice: null, error: "busy" };
 	if (applied.kind === "written") await noted(deps.store, applied.card, "You", deps.now(), "Cancelled the run");

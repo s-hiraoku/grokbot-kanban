@@ -138,7 +138,7 @@ test("the owner runs a card and the assigned Grok Bot carries it out", async () 
 	const asked = (await (await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: null }))).json()) as any;
 	expect(asked.notice).toBe("Asked Ops to run this card. It starts on the Bot's next check.");
 	const requested = cardIn(asked.board, created.card.id)!;
-	expect(requested.column).toBe("todo");
+	expect(requested.column).toBe("inProgress");
 	expect((requested.card as any).run).toMatchObject({ bot: { name: "Ops" }, status: "requested" });
 	const twice = await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: null }));
 	expect(twice.status).toBe(400);
@@ -159,12 +159,23 @@ test("the owner runs a card and the assigned Grok Bot carries it out", async () 
 	expect(finished.notes).toMatch(/You\] Asked Ops to run this card\n.*Ops\] Started the run\n.*Ops\] Run .*: Drafted the reply$/);
 	expect((await call("list_run_requests", { bot: "Ops" })).count).toBe(0);
 
+	// Run starts from Inbox, Todo, or a stopped In Progress card, never from review.
+	expect((await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: ops.id }))).status).toBe(400);
+	await command(ownerRequest(holder.current!, { type: "move", cardId: created.card.id, to: "todo" }));
 	await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: ops.id }));
 	const stopped = (await (await command(ownerRequest(holder.current!, { type: "stop", cardId: created.card.id }))).json()) as any;
 	expect(stopped.notice).toBe("Run cancelled");
-	expect((cardIn(stopped.board, created.card.id)!.card as any).run).toBeNull();
+	expect(cardIn(stopped.board, created.card.id)).toMatchObject({ column: "todo", card: { run: null } });
 	const gone = await rpc("tools/call", { name: "finish_run", arguments: { bot: "Ops", card: created.card.id, outcome: "done", summary: "late" } });
 	expect(gone.body!.result.isError).toBe(true);
+
+	// A run cancelled mid-work leaves the card in In Progress, where Re-run picks it up again.
+	await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: ops.id }));
+	await call("start_run", { bot: "Ops", card: created.card.id });
+	const halted = (await (await command(ownerRequest(holder.current!, { type: "stop", cardId: created.card.id }))).json()) as any;
+	expect(cardIn(halted.board, created.card.id)).toMatchObject({ column: "inProgress", card: { run: null } });
+	const rerun = (await (await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: ops.id }))).json()) as any;
+	expect(cardIn(rerun.board, created.card.id)).toMatchObject({ column: "inProgress", card: { run: { status: "requested" } } });
 });
 
 test("the REST bot API reads X-Bot-Name and resolves assignees", async () => {
