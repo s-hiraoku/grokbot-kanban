@@ -54,7 +54,7 @@ test("MCP needs the bot token and speaks JSON-RPC", async () => {
 	const names = (list.body!.result.tools as { name: string; annotations: { readOnlyHint: boolean } }[]).map((tool) => tool.name);
 	expect(names).toEqual(expect.arrayContaining(["board_summary", "list_cards", "create_card", "assign_card", "add_note", "move_card", "update_my_profile"]));
 	const readOnly = (list.body!.result.tools as { name: string; annotations: { readOnlyHint: boolean } }[]).filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name);
-	expect(readOnly.sort()).toEqual(["board_summary", "get_card", "list_bots", "list_cards"]);
+	expect(readOnly.sort()).toEqual(["board_summary", "get_card", "list_bots", "list_cards", "list_run_requests"]);
 
 	const unknown = await rpc("does/not/exist");
 	expect(unknown.body!.error.code).toBe(-32601);
@@ -125,6 +125,46 @@ test("a bot moves cards as work progresses and signs each move", async () => {
 
 	const nowhere = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: created.card.id, to: "archive" } });
 	expect(nowhere.body!.error ?? nowhere.body!.result.isError).toBeTruthy();
+});
+
+test("the owner runs a card and the assigned Grok Bot carries it out", async () => {
+	const created = await call("create_card", { bot: "Ops", title: "run me" });
+	await call("create_card", { bot: "Scout", title: "someone else's" });
+	const unassigned = await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: null }));
+	expect(unassigned.status).toBe(400);
+
+	const ops = (await boardView()).bots.find((item: { name: string }) => item.name === "Ops");
+	await command(ownerRequest(holder.current!, { type: "edit", cardId: created.card.id, patch: { assignees: [ops.id] } }));
+	const asked = (await (await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: null }))).json()) as any;
+	expect(asked.notice).toBe("Asked Ops to run this card. It starts on the Bot's next check.");
+	const requested = cardIn(asked.board, created.card.id)!;
+	expect(requested.column).toBe("todo");
+	expect((requested.card as any).run).toMatchObject({ bot: { name: "Ops" }, status: "requested" });
+	const twice = await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: null }));
+	expect(twice.status).toBe(400);
+
+	expect((await call("board_summary", { bot: "Ops" })).runRequests).toHaveLength(1);
+	const queue = await call("list_run_requests", { bot: "Ops" });
+	expect(queue.cards.map((card: { id: string }) => card.id)).toEqual([created.card.id]);
+	expect((await call("list_run_requests", { bot: "Scout" })).count).toBe(0);
+
+	const stolen = await rpc("tools/call", { name: "start_run", arguments: { bot: "Scout", card: created.card.id } });
+	expect(stolen.body!.result.isError).toBe(true);
+	const started = await call("start_run", { bot: "Ops", card: created.card.shortId });
+	expect(started).toMatchObject({ column: "inProgress", run: { status: "working" } });
+	expect((await call("start_run", { bot: "Ops", card: created.card.id })).column).toBe("inProgress");
+
+	const finished = await call("finish_run", { bot: "Ops", card: created.card.id, outcome: "review", summary: "Drafted the reply" });
+	expect(finished).toMatchObject({ column: "inReview", run: null });
+	expect(finished.notes).toMatch(/You\] Asked Ops to run this card\n.*Ops\] Started the run\n.*Ops\] Run .*: Drafted the reply$/);
+	expect((await call("list_run_requests", { bot: "Ops" })).count).toBe(0);
+
+	await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id, bot: ops.id }));
+	const stopped = (await (await command(ownerRequest(holder.current!, { type: "stop", cardId: created.card.id }))).json()) as any;
+	expect(stopped.notice).toBe("Run cancelled");
+	expect((cardIn(stopped.board, created.card.id)!.card as any).run).toBeNull();
+	const gone = await rpc("tools/call", { name: "finish_run", arguments: { bot: "Ops", card: created.card.id, outcome: "done", summary: "late" } });
+	expect(gone.body!.result.isError).toBe(true);
 });
 
 test("the REST bot API reads X-Bot-Name and resolves assignees", async () => {
@@ -235,7 +275,7 @@ test("cards a Cursor agent held before agents were removed read back in place an
 	expect(cardIn(((await dropped.json()) as { board: any }).board, reviewed.card.id)).toMatchObject({ column: "done", card: { links: { pr: run.prUrl } } });
 	// What is written back is still a state the previous version can read.
 	const row = await holder.current!.client.query<{ state: unknown }>("select state from cards where id = $1", [reviewed.card.id]);
-	expect(row.rows[0]?.state).toEqual({ kind: "idle", column: "done", last: run });
+	expect(row.rows[0]?.state).toEqual({ kind: "idle", column: "done", botRun: null, last: run });
 });
 
 test("a command on a card that is gone says so and sends the fresh board", async () => {

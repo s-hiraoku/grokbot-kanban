@@ -173,6 +173,7 @@ export default function CardDrawer({
 							New card for Inbox
 						</span>
 					)}
+					{card ? <RunMenu card={card} members={members} send={send} /> : null}
 					{card ? <span className="card-id">#{card.shortId}</span> : null}
 					<span className="drawer-tools">
 						<button type="button" className="icon" aria-label={wide ? "Show as side panel" : "Open in a large view"} aria-pressed={wide} title={wide ? "Side panel" : "Large view"} onClick={toggleWide}>
@@ -235,6 +236,16 @@ export default function CardDrawer({
 								{card.createdBy ? <MemberAvatar member={card.createdBy} size={20} /> : null}
 								<span>
 									Filed by {card.createdBy?.name ?? "the API"}, {card.age === "just now" ? "just now" : `${card.age} ago`}
+								</span>
+							</p>
+						) : null}
+						{card?.run ? (
+							<p className={`run-banner ${card.run.status}`}>
+								<MemberAvatar member={card.run.bot} size={22} />
+								<span lang="ja">
+									{card.run.status === "working"
+										? `${card.run.bot.name} is working on this card (started ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). Its report lands in Notes.`
+										: `Waiting for ${card.run.bot.name} to pick this up (asked ${card.run.since === "just now" ? "just now" : `${card.run.since} ago`}). The Bot checks on its routine.`}
 								</span>
 							</p>
 						) : null}
@@ -384,6 +395,74 @@ export default function CardDrawer({
 				</footer>
 			</form>
 		</div>
+	);
+}
+
+/**
+ * Run hands the card to a Grok Bot. The menu lists the card's bots first, then the rest of the roster;
+ * a pending or working run shows here with Cancel run.
+ */
+function RunMenu({ card, members, send }: { card: CardView; members: readonly MemberView[]; send: (command: Command) => Promise<boolean> }) {
+	const bots = members.filter((member) => member.kind === "bot");
+	const assigned = new Set(card.assignees.map((member) => member.id));
+	const ordered = [...bots.filter((bot) => assigned.has(bot.id)), ...bots.filter((bot) => !assigned.has(bot.id))];
+	const run = card.run;
+	return (
+		<Menu
+			label={run ? `Run: ${run.status === "working" ? `${run.bot.name} working` : `waiting for ${run.bot.name}`}` : "Run with a Grok Bot"}
+			className={`run-button${run ? ` ${run.status}` : ""}`}
+			align="left"
+			icon={
+				<>
+					{run ? <MemberAvatar member={run.bot} size={18} /> : <svg className="play" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" /></svg>}
+					<span>{run ? (run.status === "working" ? "Running" : "Requested") : "Run"}</span>
+					<svg className="caret" viewBox="0 0 10 6" aria-hidden="true">
+						<path d="M1 1l4 4 4-4" />
+					</svg>
+				</>
+			}
+		>
+			{(close) =>
+				run ? (
+					<>
+						<p className="menu-note">
+							{run.status === "working" ? `${run.bot.name} is on it.` : `${run.bot.name} has not picked it up yet.`}
+						</p>
+						<button
+							type="button"
+							role="menuitem"
+							className="danger-item"
+							onClick={() => {
+								close();
+								void send({ type: "stop", cardId: card.id });
+							}}
+						>
+							Cancel run
+						</button>
+					</>
+				) : (
+					<>
+						<p className="menu-title">Run with</p>
+						{ordered.length === 0 ? <p className="menu-note">No bots yet. Connect one under Bots & MCP.</p> : null}
+						{ordered.map((bot) => (
+							<button
+								key={bot.id}
+								type="button"
+								role="menuitem"
+								onClick={() => {
+									close();
+									void send({ type: "run", cardId: card.id, bot: bot.id });
+								}}
+							>
+								<MemberAvatar member={bot} size={20} />
+								<span lang="ja">{bot.name}</span>
+								{assigned.has(bot.id) ? <span className="menu-hint">assigned</span> : null}
+							</button>
+						))}
+					</>
+				)
+			}
+		</Menu>
 	);
 }
 

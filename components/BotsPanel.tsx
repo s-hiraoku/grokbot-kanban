@@ -46,7 +46,14 @@ export default function BotsPanel({
 - 新しい依頼や不具合報告は create_card で Inbox に起票する。X の投稿なら externalId に投稿 ID を入れる
 - 別の Bot に渡すときは assign_card の add にその Bot 名を入れ、add_note で引き継ぎ内容を書く
 - 作業が進んだら move_card でカードを動かし、reason に理由を書く（着手したら inProgress、確認待ちは inReview、完了は done、見送りは wontDo、着手可能になったら todo）
-まだ Routine は作らないでください。`;
+- 自分宛ての Run 依頼は list_run_requests で確認し、start_run → 作業 → finish_run の順で進める`;
+	const routineMessage = `「Kanban Run」という Routine を作ってください。
+- スケジュール: 5 分ごと
+- 毎回やること: kanban の list_run_requests を bot 引数にあなたの Bot 名を入れて呼ぶ。0 件なら何もしないで終わる
+- 依頼があれば古い順に 1 件ずつ: start_run を呼ぶ → get_card で内容を読む → 書かれている作業をする → 途中経過は add_note に残す → finish_run を呼ぶ（完了は done、オーナーの確認が要るなら review、進められないなら blocked）。summary には、やったこと・結果のリンク・残っていることを書く
+- 承認が要る操作は、いつも通り私に確認してから進める
+- finish_run が「run がない」と返したら、オーナーが取り消したので作業を止めて add_note に状況を残す
+作ったら、テスト実行をせずに Routine の内容を短く報告してください。`;
 	const iconMessage = `あなたのプロフィール画像を kanban に登録してください。
 1. 下に添付した画像（あなたの Edit Profile のアイコンと同じもの）をファイルに保存する
 2. コンピューターで正方形に切り抜いて 128px に縮小し、PNG か WebP にする（90 KB 未満）
@@ -166,6 +173,10 @@ export default function BotsPanel({
 							<li>
 								Optional: save the working rules as a Skill so every Bot uses the board the same way.
 								<CopyBlock text={skillMessage} />
+							</li>
+							<li>
+								For <strong>Run</strong>: the board cannot wake a Bot, so each Bot checks for its runs on a routine. Send this to every Bot you want to run cards. Routines run at most every 5 minutes, so a Run starts within about 5 minutes.
+								<CopyBlock text={routineMessage} />
 							</li>
 							<li>
 								Optional: let the Bot set its own icon. Grok Bot does not share profile images with connectors, so attach the Bot's icon image to this message. You can also upload it yourself under Roster.

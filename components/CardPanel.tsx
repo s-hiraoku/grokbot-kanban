@@ -27,6 +27,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 		"card",
 		`priority-${card.priority}`,
 		lead ? "" : "no-owner",
+		card.run ? `is-${card.run.status}` : "",
 		dragging ? "dragging" : "",
 		overlay ? "overlay" : "",
 		highlighted ? "highlighted" : "",
@@ -62,6 +63,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 				</p>
 			) : null}
 			<div className="tags">
+				{card.run ? <RunPill run={card.run} /> : null}
 				{card.priority === "high" ? <span className="tag high">High</span> : null}
 				{card.priority === "low" ? <span className="tag low">Low</span> : null}
 				{card.repoLabel ? <span className="tag repo">{card.repoLabel}</span> : null}
@@ -92,6 +94,19 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 });
 
 export default CardPanel;
+
+export function RunPill({ run }: { run: NonNullable<CardView["run"]> }) {
+	const text = run.status === "working" ? `${run.bot.name} working` : `Waiting for ${run.bot.name}`;
+	return (
+		<span className={`pill ${run.status}`} title={`${text}, ${run.since === "just now" ? "just now" : `${run.since} ago`}`}>
+			{run.status === "working" ? <span className="pulse" aria-hidden="true" /> : null}
+			<MemberAvatar member={run.bot} size={14} />
+			<span className="pill-text" lang="ja">
+				{run.status === "working" ? "Running" : "Run requested"}
+			</span>
+		</span>
+	);
+}
 
 function CardMenu({ card, handlers }: { card: CardView; handlers: CardHandlers }) {
 	const [open, setOpen] = useState(false);

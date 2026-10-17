@@ -61,8 +61,22 @@ export type PastRun = {
 	prUrl: HttpsUrl | null;
 };
 
-/** Where a card sits. The stored shape matches what earlier versions wrote for an idle card. */
-export type CardState = { kind: "idle"; column: Column; last: PastRun | null };
+/**
+ * A Run the owner asked a Grok Bot to do. The board cannot wake a Bot, so the Bot finds requests on its
+ * own schedule (a routine that calls list_run_requests), marks the run working, and reports back.
+ */
+export type BotRun = {
+	bot: MemberId;
+	status: "requested" | "working";
+	requestedAt: Instant;
+	startedAt: Instant | null;
+};
+
+/**
+ * Where a card sits, and the Bot run it is waiting on, if any. The stored shape is still the idle state
+ * earlier versions wrote; they ignore the extra botRun field.
+ */
+export type CardState = { kind: "idle"; column: Column; last: PastRun | null; botRun: BotRun | null };
 
 export type Card = {
 	id: CardId;
@@ -81,7 +95,7 @@ export function columnOf(state: CardState): Column {
 /** The state after moving to a column, or null when the card is already there. */
 export function moved(state: CardState, to: Column): CardState | null {
 	if (state.column === to) return null;
-	return { kind: "idle", column: to, last: state.last };
+	return { ...state, column: to };
 }
 
 /** A rank that sorts between two neighbours. Either side may be missing. */

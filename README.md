@@ -53,6 +53,10 @@ The team dock on the left lists you and every bot with how many cards each holds
 
 Each card shows the bot that filed it, a stripe in the color of the first assignee (dashed when nobody holds it), and the assignees' faces. Click a card, or focus it and press Enter, to open it in the side panel. The title and details read as text: headings (`#`), lists (`-`), and links render, and Edit or a double-click turns the details into a field. Notes show as a log of who wrote what, when. The status button at the top is a menu that moves the card to another column, and the ⋯ menu has Copy link and Delete card. The expand button opens the card in a large centered view with the fields in a side column; the board remembers the choice. Assignees use a GitHub-style gear menu where several members can be picked. Field edits wait for Save changes, or Cmd/Ctrl + Enter. The ⋮ menu on a card has Edit and Delete; Delete asks first. Bots cannot delete cards. The ＋ on Inbox adds cards by title only. Done and Won't Do fold into narrow strips that still take drops; Won't Do starts folded. `/` focuses search and `n` opens a new card. The board refreshes every 15 seconds while it is open.
 
+### Run a card with a Grok Bot
+
+**Run** next to the status button asks a Grok Bot to carry out the card. Pick a bot from the menu (assigned bots come first); the bot is added to the assignees, the card moves to Todo, and it shows *Requested*. Grok Bot has no API that starts a Bot from outside, so the Bot picks the request up itself: its **Kanban Run** routine calls `list_run_requests` every 5 minutes, then `start_run` (the card moves to In Progress and shows *Running*), does the work, leaves progress in the notes, and ends with `finish_run`. The outcome decides the column: `done` → Done, `review` → In Review, `blocked` → back to Todo. Every step is signed into the notes. While a run is waiting or working, the Run menu has **Cancel run**; a Bot that calls `finish_run` after that is told the run is gone. Set up the routine once per Bot with the message under **Bots & MCP → Connect Grok Bot**.
+
 `/?card=<id>` scrolls to a card and highlights it. MCP results carry this link so a bot's report can point at the card.
 
 ## Grok Bot over MCP
@@ -69,11 +73,14 @@ Because the connector is shared, the board cannot tell Bots apart by token. Ever
 | `list_cards` | no | Filter by column, assignee (`me`, `owner`, a bot name), unassigned, or text |
 | `get_card` | no | One card in full. Takes the UUID or the short id shown on the card |
 | `list_bots` | no | Roster with roles and load |
+| `list_run_requests` | no | Cards the owner asked the caller to run, oldest first |
 | `create_card` | yes | File a card in Inbox. `externalId` makes retries return the same card |
 | `update_card` | yes | Edit content. It has no column field |
 | `add_note` | yes | Append a signed, timestamped line to the notes |
 | `assign_card` | yes | Add, remove, or set assignees. With nothing given, it assigns the caller |
 | `move_card` | yes | Move to any column with a reason signed into the notes |
+| `start_run` | yes | Take a run request; the card moves to In Progress |
+| `finish_run` | yes | End the run with `done`, `review`, or `blocked` and a summary |
 | `update_my_profile` | yes | Name, role, icon, color |
 
 Read tools carry `readOnlyHint`, so Grok Bot's Auto-review can let them through while writes still ask.
