@@ -8,11 +8,11 @@ export const TOAST_MS: Record<ToastTone, number> = { success: 3500, info: 4500, 
 export const TOAST_LIMIT = 3;
 
 /** The toast for an owner command's response. Every failure gets one, even when the server sent no text. */
-export function commandToast(status: number, payload: { notice?: string | null; tone?: string | null }): ToastMessage | null {
+export function commandToast(status: number, payload: { notice?: string | null }): ToastMessage | null {
 	const notice = payload.notice?.trim() || null;
 	if (status >= 200 && status < 300) {
 		if (!notice) return null;
-		return { text: notice, tone: payload.tone === "warning" ? "warning" : "success" };
+		return { text: notice, tone: "success" };
 	}
 	return { text: notice ?? fallbackFor(status), tone: "error" };
 }

@@ -1,4 +1,4 @@
-import { bearerMatches, clearedSessionCookie, mintBot, mintCron, mintOwner, readSession, sessionCookie, tokenFromCookie, type Bot, type Cron, type Owner } from "./auth";
+import { bearerMatches, clearedSessionCookie, mintBot, mintOwner, readSession, sessionCookie, tokenFromCookie, type Bot, type Owner } from "./auth";
 import { BadRequest } from "./parse";
 import type { Env } from "./runtime";
 
@@ -73,11 +73,6 @@ export function requireOwner(req: Request, env: Env): Owner | Response {
 export function requireBot(req: Request, env: Env): Bot | Response {
 	if (!bearerMatches(req.headers.get("authorization"), env.botToken)) return unauthorized();
 	return mintBot();
-}
-
-export function requireCron(req: Request, env: Env): Cron | Response {
-	if (!bearerMatches(req.headers.get("authorization"), env.cronSecret)) return unauthorized();
-	return mintCron();
 }
 
 export function loginCookie(env: Env, req: Request): string {

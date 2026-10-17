@@ -105,37 +105,26 @@ test("a bot files, claims, and annotates a card through MCP", async () => {
 	expect(board.bots.find((item: { name: string }) => item.name === "Bug Repro")).toMatchObject({ assigned: 1, created: 1, role: "Reproduces bug reports" });
 });
 
-test("a bot parks cards as work progresses but never starts or interrupts a run", async () => {
-	const created = await call("create_card", { bot: "Ops", title: "run me", repo: { url: "https://github.com/a/b" } });
+test("a bot moves cards as work progresses and signs each move", async () => {
+	const created = await call("create_card", { bot: "Ops", title: "move me", repo: { url: "https://github.com/a/b" } });
 	const { body } = await rpc("tools/call", { name: "update_card", arguments: { bot: "Ops", card: created.card.id, column: "todo" } });
 	expect(body!.result.isError).toBe(true);
 
 	const parked = await call("move_card", { bot: "Ops", card: created.card.shortId, to: "todo" });
 	expect(parked.column).toBe("todo");
-	expect(parked.status).toBe("idle");
-	expect(holder.current!.cursor.created).toEqual([]);
 
 	const done = await call("move_card", { bot: "Ops", card: created.card.id, to: "done", reason: "Fixed in PR 12" });
 	expect(done.column).toBe("done");
 	expect(done.notes).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} Ops\] Moved from Todo to Done: Fixed in PR 12$/);
 
 	const working = await call("move_card", { bot: "Ops", card: created.card.id, to: "inProgress", reason: "Reproducing" });
-	expect(working).toMatchObject({ column: "inProgress", status: "idle", agentUrl: null });
+	expect(working).toMatchObject({ column: "inProgress", agentUrl: null });
 	const checking = await call("move_card", { bot: "Ops", card: created.card.id, to: "inReview" });
-	expect(checking).toMatchObject({ column: "inReview", status: "idle", prUrl: null });
+	expect(checking).toMatchObject({ column: "inReview", prUrl: null });
 	expect(checking.notes).toMatch(/Moved from Done to In Progress: Reproducing\n.*Moved from In Progress to In Review$/);
-	expect(holder.current!.cursor.created).toEqual([]);
 
 	const nowhere = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: created.card.id, to: "archive" } });
 	expect(nowhere.body!.error ?? nowhere.body!.result.isError).toBeTruthy();
-
-	await call("move_card", { bot: "Ops", card: created.card.id, to: "inbox" });
-	await command(ownerRequest(holder.current!, { type: "run", cardId: created.card.id }));
-	expect(holder.current!.cursor.created).toHaveLength(1);
-	const running = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: created.card.id, to: "done" } });
-	expect(running.body!.result.isError).toBe(true);
-	expect(running.body!.result.content[0].text).toMatch(/Only the owner can move it/);
-	expect((await call("get_card", { card: created.card.id })).column).toBe("inProgress");
 });
 
 test("the REST bot API reads X-Bot-Name and resolves assignees", async () => {
@@ -151,42 +140,21 @@ test("the REST bot API reads X-Bot-Name and resolves assignees", async () => {
 	expect(anonymous.status).toBe(400);
 });
 
-test("a drop parks, reorders, or runs depending on the column", async () => {
+test("a drop moves a card to any column or reorders it in place", async () => {
 	const plain = await call("create_card", { bot: "Ops", title: "no repo" });
-	const repo = await call("create_card", { bot: "Ops", title: "has repo", repo: { url: "https://github.com/a/b" } });
+	await call("create_card", { bot: "Ops", title: "has repo", repo: { url: "https://github.com/a/b" } });
 	const third = await call("create_card", { bot: "Ops", title: "third" });
 
-	const parked = await command(ownerRequest(holder.current!, { type: "drop", cardId: plain.card.id, column: "todo", index: 0 }));
-	const parkedBody = (await parked.json()) as { board: any; notice: string };
-	expect(cardIn(parkedBody.board, plain.card.id)?.column).toBe("todo");
-	expect(parkedBody.notice).toBe("Parked in Todo. Set a repo to run it.");
-	// The drop did less than it looked like it would, so the board shows it as a warning.
-	expect((parkedBody as any).tone).toBe("warning");
-	expect(holder.current!.cursor.created).toEqual([]);
+	for (const column of ["todo", "inProgress", "inReview", "done", "wontDo"]) {
+		const moved = await command(ownerRequest(holder.current!, { type: "drop", cardId: plain.card.id, column, index: 0 }));
+		const body = (await moved.json()) as { board: any; notice: string | null };
+		expect(cardIn(body.board, plain.card.id)?.column).toBe(column);
+		expect(body.notice).toBeNull();
+	}
 
 	const reordered = await command(ownerRequest(holder.current!, { type: "drop", cardId: third.card.id, column: "inbox", index: 0 }));
 	const inbox = ((await reordered.json()) as { board: any }).board.columns.find((column: { id: string }) => column.id === "inbox");
 	expect(inbox.cards.map((card: { title: string }) => card.title)).toEqual(["third", "has repo"]);
-
-	const review = await command(ownerRequest(holder.current!, { type: "drop", cardId: third.card.id, column: "inReview", index: 0 }));
-	const reviewBody = (await review.json()) as { board: any; notice: string | null };
-	expect(cardIn(reviewBody.board, third.card.id)).toMatchObject({ column: "inReview", card: { pill: null } });
-	expect(reviewBody.notice).toBeNull();
-	expect((reviewBody as any).tone).toBeNull();
-
-	const manual = await command(ownerRequest(holder.current!, { type: "drop", cardId: plain.card.id, column: "inProgress", index: 0 }));
-	const manualBody = (await manual.json()) as { board: any; notice: string };
-	expect(cardIn(manualBody.board, plain.card.id)).toMatchObject({ column: "inProgress", card: { pill: null, action: { command: "run", enabled: true } } });
-	expect(manualBody.notice).toBe("Moved to In Progress without an agent. Set a repo to run one.");
-	expect((manualBody as any).tone).toBe("warning");
-	expect(manualBody.board.agents.running).toBe(0);
-	expect(holder.current!.cursor.created).toEqual([]);
-
-	const run = await command(ownerRequest(holder.current!, { type: "drop", cardId: repo.card.id, column: "todo", index: 0 }));
-	const runBody = (await run.json()) as { board: any; notice: string };
-	expect(cardIn(runBody.board, repo.card.id)?.column).toBe("inProgress");
-	expect((runBody as any).tone).toBeNull();
-	expect(holder.current!.cursor.created).toHaveLength(1);
 });
 
 test("the owner assigns from the board and manages the roster", async () => {
@@ -210,19 +178,12 @@ test("the owner assigns from the board and manages the roster", async () => {
 	expect((cardIn(removedBoard, created.card.id)!.card as any).assignees.map((member: { name: string }) => member.name)).toEqual(["You"]);
 });
 
-test("the owner deletes a card, but not one with a live run", async () => {
+test("the owner deletes a card, and bots cannot", async () => {
 	const idle = await call("create_card", { bot: "Ops", title: "throw away" });
 	const removed = await command(ownerRequest(holder.current!, { type: "deleteCard", cardId: idle.card.id }));
 	const removedBody = (await removed.json()) as { board: any; notice: string };
 	expect(removedBody.notice).toBe("Card deleted");
 	expect(cardIn(removedBody.board, idle.card.id)).toBeNull();
-
-	const live = await call("create_card", { bot: "Ops", title: "keep", repo: { url: "https://github.com/a/b" } });
-	await command(ownerRequest(holder.current!, { type: "run", cardId: live.card.id }));
-	const refused = await command(ownerRequest(holder.current!, { type: "deleteCard", cardId: live.card.id }));
-	expect(refused.status).toBe(400);
-	expect(((await refused.json()) as { notice: string }).notice).toBe("Stop the agent before deleting this card.");
-	expect((await call("get_card", { card: live.card.id })).column).toBe("inProgress");
 
 	const tools = (await rpc("tools/list")).body!.result.tools as { name: string }[];
 	expect(tools.map((tool) => tool.name).some((name) => name.includes("delete"))).toBe(false);
@@ -255,35 +216,26 @@ test("an uploaded icon is stored once and served from its own URL", async () => 
 	expect(tooBig.body!.error ?? tooBig.body!.result.isError).toBeTruthy();
 });
 
-test("drops into In Progress and In Review respect queued and running cards", async () => {
-	const live = await call("create_card", { bot: "Ops", title: "with repo", repo: { url: "https://github.com/a/b" } });
-	const run = await command(ownerRequest(holder.current!, { type: "drop", cardId: live.card.id, column: "inProgress", index: 0 }));
-	const runBody = (await run.json()) as { board: any };
-	expect(cardIn(runBody.board, live.card.id)?.column).toBe("inProgress");
-	expect(runBody.board.agents.running).toBe(1);
-	expect(holder.current!.cursor.created).toHaveLength(1);
+test("cards a Cursor agent held before agents were removed read back in place and move freely", async () => {
+	const legacy = await call("create_card", { bot: "Ops", title: "old run" });
+	const reviewed = await call("create_card", { bot: "Ops", title: "old review" });
+	const agent = { agentId: "bc-1", runId: "run-1", url: "https://cursor.com/agents/bc-1" };
+	const launch = { id: "l-1", requestedAt: 0, request: { promptText: "x", repo: { url: "https://github.com/a/b", startingRef: "main" } } };
+	const run = { kind: "ended", launchId: "l-1", endedAt: 1, agent, outcome: "finished", prUrl: "https://github.com/a/b/pull/7" };
+	await holder.current!.client.query("update cards set state = $1 where id = $2", [{ kind: "running", launch, slot: 1, agent, cursorStatus: "RUNNING" }, legacy.card.id]);
+	await holder.current!.client.query("update cards set state = $1 where id = $2", [{ kind: "review", run }, reviewed.card.id]);
 
-	const refused = await command(ownerRequest(holder.current!, { type: "drop", cardId: live.card.id, column: "inReview", index: 0 }));
-	const refusedBody = (await refused.json()) as { board: any; notice: string };
-	expect(refusedBody.notice).toBe("Stop the agent before moving this card.");
-	expect((refusedBody as any).tone).toBe("warning");
-	expect(cardIn(refusedBody.board, live.card.id)?.column).toBe("inProgress");
+	const board = await boardView();
+	expect(cardIn(board, legacy.card.id)?.column).toBe("inProgress");
+	expect(cardIn(board, reviewed.card.id)).toMatchObject({ column: "inReview", card: { links: { pr: "https://github.com/a/b/pull/7", agent: agent.url } } });
 
-	// Fill the other two slots so the next run waits in Todo.
-	for (const title of ["two", "three"]) {
-		const extra = await call("create_card", { bot: "Ops", title, repo: { url: "https://github.com/a/b" } });
-		await command(ownerRequest(holder.current!, { type: "run", cardId: extra.card.id }));
-	}
-	const waiting = await call("create_card", { bot: "Ops", title: "waits", repo: { url: "https://github.com/a/b" } });
-	await command(ownerRequest(holder.current!, { type: "run", cardId: waiting.card.id }));
-	expect((await call("get_card", { card: waiting.card.id })).status).toBe("queued");
-	const pushed = await command(ownerRequest(holder.current!, { type: "drop", cardId: waiting.card.id, column: "inProgress", index: 0 }));
-	expect(((await pushed.json()) as { notice: string }).notice).toBe("This card is already waiting for an agent slot.");
-	expect((await call("get_card", { card: waiting.card.id })).status).toBe("queued");
-
-	const bot = await rpc("tools/call", { name: "move_card", arguments: { bot: "Ops", card: waiting.card.id, to: "inProgress" } });
-	expect(bot.body!.result.isError).toBe(true);
-	expect(holder.current!.cursor.created).toHaveLength(3);
+	const moved = await call("move_card", { bot: "Ops", card: legacy.card.id, to: "done" });
+	expect(moved.column).toBe("done");
+	const dropped = await command(ownerRequest(holder.current!, { type: "drop", cardId: reviewed.card.id, column: "done", index: 0 }));
+	expect(cardIn(((await dropped.json()) as { board: any }).board, reviewed.card.id)).toMatchObject({ column: "done", card: { links: { pr: run.prUrl } } });
+	// What is written back is still a state the previous version can read.
+	const row = await holder.current!.client.query<{ state: unknown }>("select state from cards where id = $1", [reviewed.card.id]);
+	expect(row.rows[0]?.state).toEqual({ kind: "idle", column: "done", last: run });
 });
 
 test("a command on a card that is gone says so and sends the fresh board", async () => {
@@ -291,7 +243,6 @@ test("a command on a card that is gone says so and sends the fresh board", async
 	await command(ownerRequest(holder.current!, { type: "deleteCard", cardId: gone.card.id }));
 	for (const stale of [
 		{ type: "drop", cardId: gone.card.id, column: "done", index: 0 },
-		{ type: "run", cardId: gone.card.id },
 		{ type: "edit", cardId: gone.card.id, patch: { title: "again" } },
 	]) {
 		const response = await command(ownerRequest(holder.current!, stale));
@@ -300,14 +251,6 @@ test("a command on a card that is gone says so and sends the fresh board", async
 		expect(body.notice).toBe("That card or bot no longer exists. The board was refreshed.");
 		expect(cardIn(body.board, gone.card.id)).toBeNull();
 	}
-});
-
-test("a run that only queues is a warning, a run that starts is not", async () => {
-	const ids: string[] = [];
-	for (const title of ["a", "b", "c", "d"]) ids.push((await call("create_card", { bot: "Ops", title, repo: { url: "https://github.com/a/b" } })).card.id);
-	const tones: (string | null)[] = [];
-	for (const id of ids) tones.push(((await (await command(ownerRequest(holder.current!, { type: "run", cardId: id }))).json()) as { tone: string | null }).tone);
-	expect(tones).toEqual([null, null, null, "warning"]);
 });
 
 test("a bot without an icon is reminded to send its profile image until it does", async () => {

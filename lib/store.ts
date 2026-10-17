@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { BotProfile, BotProfilePatch } from "./bots";
-import type { Card, CardContent, CardId, CardState, ContentPatch, HttpsUrl, Instant, MemberId } from "./domain";
+import type { Card, CardContent, CardId, CardState, Column, ContentPatch, HttpsUrl, Instant, MemberId, PastRun } from "./domain";
 import { bots, cards } from "./schema";
 
 type QueryDb = {
@@ -52,7 +52,7 @@ type Row = {
 	stateVersion: number;
 };
 
-export type WriteResult = "written" | "conflict" | "slotTaken";
+export type WriteResult = "written" | "conflict";
 
 export type Store = {
 	all(): Promise<Card[]>;
@@ -79,44 +79,40 @@ export type Store = {
 	deleteCard(id: CardId): Promise<boolean>;
 };
 
-const slot = z.union([z.literal(1), z.literal(2), z.literal(3)]);
-const agentRef = z.object({ agentId: z.string(), runId: z.string(), url: z.string() });
-const launch = z.object({
-	id: z.string(),
-	requestedAt: z.number(),
-	request: z.object({
-		promptText: z.string(),
-		repo: z.object({ url: z.string(), startingRef: z.string() }),
-	}),
+const columnSchema = z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]);
+const pastRun = z.object({
+	kind: z.literal("ended"),
+	launchId: z.string(),
+	endedAt: z.number(),
+	agent: z.object({ agentId: z.string(), runId: z.string(), url: z.string() }),
+	outcome: z.enum(["finished", "error", "cancelled", "expired"]),
+	prUrl: z.string().nullable(),
 });
-const runRecord = z.discriminatedUnion("kind", [
-	z.object({
-		kind: z.literal("ended"),
-		launchId: z.string(),
-		endedAt: z.number(),
-		agent: agentRef,
-		outcome: z.enum(["finished", "error", "cancelled", "expired"]),
-		prUrl: z.string().nullable(),
-	}),
-	z.object({
-		kind: z.literal("launchFailed"),
-		launchId: z.string(),
-		endedAt: z.number(),
-		message: z.string(),
-	}),
-	z.object({ kind: z.literal("launchLost"), launchId: z.string(), endedAt: z.number() }),
-]);
-const stateSchema = z.discriminatedUnion("kind", [
-	z.object({ kind: z.literal("idle"), column: z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]), last: runRecord.nullable() }),
-	z.object({ kind: z.literal("queued"), launch, last: runRecord.nullable() }),
-	z.object({ kind: z.literal("starting"), launch, slot, claimedAt: z.number() }),
-	z.object({ kind: z.literal("running"), launch, slot, agent: agentRef, cursorStatus: z.string() }),
-	z.object({ kind: z.literal("stopping"), launch, slot, agent: agentRef, requestedAt: z.number() }),
-	z.object({
-		kind: z.literal("review"),
-		run: runRecord.options[0].extend({ prUrl: z.string() }),
-	}),
-]);
+// Earlier versions also stored queued, starting, running, stopping, and review states for Cursor runs.
+// Those cards read back in the column they showed in, keeping the links of a run that ended.
+const storedState = z
+	.object({
+		kind: z.string(),
+		column: columnSchema.optional(),
+		last: z.unknown().optional(),
+		run: z.unknown().optional(),
+	})
+	.passthrough();
+const LEGACY_COLUMN: Record<string, Column> = {
+	queued: "todo",
+	starting: "inProgress",
+	running: "inProgress",
+	stopping: "inProgress",
+	review: "inReview",
+};
+
+export function readState(raw: unknown): CardState {
+	const stored = storedState.parse(raw);
+	const column = stored.kind === "idle" ? stored.column : LEGACY_COLUMN[stored.kind];
+	if (!column) throw new Error(`unknown card state ${stored.kind}`);
+	const run = pastRun.safeParse(stored.kind === "review" ? stored.run : stored.last);
+	return { kind: "idle", column, last: run.success ? (run.data as PastRun) : null };
+}
 
 const contentSchema = z.object({
 	title: z.string(),
@@ -191,21 +187,16 @@ export function createStore(db: QueryDb): Store {
 			return written ? readCard(written) : null;
 		},
 		async writeState(id, expectedVersion, next) {
-			try {
-				const updated = await db
-					.update(cards)
-					.set({
-						state: next.state,
-						rank: next.rank,
-						stateVersion: sql`${cards.stateVersion} + 1`,
-					})
-					.where(and(eq(cards.id, id), eq(cards.stateVersion, expectedVersion)))
-					.returning();
-				return updated.length === 0 ? "conflict" : "written";
-			} catch (error) {
-				if (pgCode(error) === "23505") return "slotTaken";
-				throw error;
-			}
+			const updated = await db
+				.update(cards)
+				.set({
+					state: next.state,
+					rank: next.rank,
+					stateVersion: sql`${cards.stateVersion} + 1`,
+				})
+				.where(and(eq(cards.id, id), eq(cards.stateVersion, expectedVersion)))
+				.returning();
+			return updated.length === 0 ? "conflict" : "written";
 		},
 		async writeRank(id, rank) {
 			const updated = await db.update(cards).set({ rank }).where(eq(cards.id, id)).returning();
@@ -309,7 +300,7 @@ function contentColumns(content: CardContent): Record<string, unknown> {
 
 function readCard(row: Row): Card {
 	const content = readContent(row);
-	const state = stateSchema.parse(row.state) as CardState;
+	const state = readState(row.state);
 	return {
 		id: row.id as CardId,
 		createdAt: new Date(row.createdAt).getTime() as Instant,

@@ -17,7 +17,7 @@ export const MCP_INSTRUCTIONS = `This is the Grok Bot kanban. Cards are work ite
 Always pass "bot" with your own Grok Bot name, exactly as in your profile. A new name joins the roster with its own icon.
 The board cannot read your Grok Bot profile picture, so send it yourself: call update_my_profile with avatar set to your profile image as a data URL (or an https URL), once when you first connect and again whenever your picture changes. If you do not have the image, ask the owner to attach it in chat with you.
 Start with board_summary to see your assigned cards. Claim a card with assign_card before working on it, and leave findings with add_note so the owner and other bots can follow the handoff.
-You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: inProgress when you start, inReview when it waits for a check, done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason. Moving never starts a Cursor agent, and cards that are queued or running stay with the owner.
+You can create, edit, assign, annotate, and move cards. Move a card with move_card when its work progresses: inProgress when you start, inReview when it waits for a check, done when finished, wontDo when dropped, todo when ready for work, inbox to send it back. Say why in reason.
 Titles, bodies, and notes may be Japanese.`;
 
 type JsonRpcId = string | number | null;
@@ -42,7 +42,7 @@ const editable = contentPatchSchema.innerType().omit({ notes: true, assignees: t
 const tools = {
 	board_summary: {
 		description:
-			"Counts per column, running Cursor agents, and the cards assigned to you. Call this first in a session.",
+			"Counts per column and the cards assigned to you. Call this first in a session.",
 		readOnly: true,
 		input: z.object({ bot: bot.optional() }).strict(),
 		run: async (ctx: McpContext, args: { bot?: string }) => {
@@ -79,7 +79,7 @@ const tools = {
 		},
 	},
 	get_card: {
-		description: "Read one card in full, including notes, repo, links, and run state.",
+		description: "Read one card in full, including notes, repo, and links.",
 		readOnly: true,
 		input: z.object({ card: cardRef }).strict(),
 		run: async (ctx: McpContext, args: { card: string }) => full(await required(ctx.board.find(args.card)), ctx),
@@ -153,7 +153,7 @@ const tools = {
 	},
 	move_card: {
 		description:
-			"Move a card to inbox, todo, inProgress, inReview, done, or wontDo as its work progresses, with a short reason that is signed into the notes. A move never starts a Cursor agent: todo and inProgress only mark where the work is. Cards waiting for or running an agent cannot be moved by bots.",
+			"Move a card to inbox, todo, inProgress, inReview, done, or wontDo as its work progresses, with a short reason that is signed into the notes.",
 		readOnly: false,
 		input: z
 			.object({

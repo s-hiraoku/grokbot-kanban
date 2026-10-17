@@ -4,11 +4,9 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 const capability: unique symbol = Symbol.for("grokbot-kanban.capability") as never;
 const OWNER = Symbol.for("grokbot-kanban.owner");
 const BOT = Symbol.for("grokbot-kanban.bot");
-const CRON = Symbol.for("grokbot-kanban.cron");
 
 export type Owner = { readonly [capability]: typeof OWNER };
 export type Bot = { readonly [capability]: typeof BOT };
-export type Cron = { readonly [capability]: typeof CRON };
 
 export function mintOwner(): Owner {
 	return { [capability]: OWNER };
@@ -16,18 +14,12 @@ export function mintOwner(): Owner {
 export function mintBot(): Bot {
 	return { [capability]: BOT };
 }
-export function mintCron(): Cron {
-	return { [capability]: CRON };
-}
 
 export function isOwner(value: Owner): boolean {
 	return value[capability] === OWNER;
 }
 export function isBot(value: Bot): boolean {
 	return value[capability] === BOT;
-}
-export function isCron(value: Cron): boolean {
-	return value[capability] === CRON;
 }
 
 export const SESSION_COOKIE = "kanban_owner";
