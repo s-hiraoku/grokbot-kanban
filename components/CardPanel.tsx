@@ -4,6 +4,7 @@ import { EllipsisVerticalIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { forwardRef, type HTMLAttributes } from "react";
 import { Menu, MenuItem } from "@/components/ActionMenu";
 import { AvatarStack, MemberAvatar, UnknownAvatar } from "@/components/Avatar";
+import { CreatedAt } from "@/components/CreatedAt";
 import type { Command } from "@/components/Board";
 import { RunControl } from "@/components/RunControl";
 import { cn } from "@/lib/utils";
@@ -94,7 +95,7 @@ const CardPanel = forwardRef<HTMLElement, Props>(function CardPanel(
 			<footer className={cn("mt-3 flex min-h-6 items-center gap-2 border-t border-line/50 pt-2.5", faded)}>
 				<span className="mr-auto inline-flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground" title={card.createdBy ? `Filed by ${card.createdBy.name}` : "Filed over the API"}>
 					{card.createdBy ? <MemberAvatar member={card.createdBy} size={18} /> : <UnknownAvatar size={18} />}
-					<time className="whitespace-nowrap">{card.age}</time>
+					<CreatedAt iso={card.createdAt} age={card.age} />
 				</span>
 				{card.links.pr ? (
 					<a className="rounded-md bg-secondary px-1.5 py-px text-xs font-bold text-link no-underline hover:bg-line" href={card.links.pr} target="_blank" rel="noreferrer" data-no-dnd>

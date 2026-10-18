@@ -318,7 +318,7 @@ async function dispatch(ctx: McpContext, method: string, params: unknown): Promi
 			return {
 				protocolVersion,
 				capabilities: { tools: { listChanged: false } },
-				serverInfo: { name: "grokbot-kanban", title: "Grok Bot Kanban", version: "0.2.0" },
+				serverInfo: { name: "grokbot-kanban", title: "Grok Bot Kanban", version: "0.3.0" },
 				instructions: MCP_INSTRUCTIONS,
 			};
 		}

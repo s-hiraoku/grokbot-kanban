@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cardTitled, signIn, tool, unique } from "./helpers";
+import { cardTitled, drawer, openCard, signIn, tool, unique } from "./helpers";
 
 test("a wrong password is refused with a message, and the right one opens the board", async ({ page, request }) => {
 	await tool(request, "create_card", { bot: "Scout", title: `login ${unique()}` });
@@ -63,3 +63,25 @@ for (const [name, width, height] of [
 		await expect(page.getByRole("button", { name: /New card/ })).toBeInViewport();
 	});
 }
+
+test("a card shows how long ago it was filed, then its date after two days, with the exact time on hover", async ({ page, request }) => {
+	const title = `dated ${unique()}`;
+	await tool(request, "create_card", { bot: "Ops", title });
+	await signIn(page);
+	const filed = cardTitled(page, title).locator("footer time");
+	await expect(filed).toHaveText("just now");
+	const iso = (await filed.getAttribute("datetime"))!;
+	const local = await page.evaluate((value) => {
+		const date = new Date(value);
+		const pad = (n: number) => String(n).padStart(2, "0");
+		return { day: `${date.getMonth() + 1}/${date.getDate()}`, exact: `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}` };
+	}, iso);
+	await expect(filed).toHaveAttribute("title", local.exact);
+
+	// Three days on, the same card reads as its date, on the board and in the drawer.
+	await page.clock.install({ time: Date.parse(iso) + 3 * 24 * 60 * 60 * 1000 });
+	await page.reload();
+	await expect(filed).toHaveText(local.day);
+	await openCard(page, title);
+	await expect(drawer(page).getByText(`Filed by Ops, ${local.day}`)).toBeVisible();
+});
