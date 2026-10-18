@@ -38,7 +38,10 @@ export type CardView = {
 	id: CardId;
 	shortId: string;
 	column: Column;
+	/** How long ago it was filed, from ageLabel. */
 	age: string;
+	/** When it was filed, ISO 8601, for the date and the exact time on hover. */
+	createdAt: string;
 	title: string;
 	body: string;
 	notes: string;
@@ -158,6 +161,7 @@ export function toCardView(card: Card, bots: readonly BotProfile[], now: number)
 		shortId: card.id.replaceAll("-", "").slice(0, 6),
 		column,
 		age: ageLabel(card.createdAt, now),
+		createdAt: new Date(card.createdAt).toISOString(),
 		title: card.content.title,
 		body: card.content.body,
 		notes: card.content.notes,

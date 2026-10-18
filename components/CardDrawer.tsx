@@ -1,11 +1,12 @@
 "use client";
 
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon, Maximize2Icon, Minimize2Icon, MoreHorizontalIcon, SquareTerminalIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, Maximize2Icon, Minimize2Icon, SquareTerminalIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { Fragment, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import { Menu, MenuItem, MenuTitle } from "@/components/ActionMenu";
 import AssigneePicker from "@/components/AssigneePicker";
 import { MemberAvatar } from "@/components/Avatar";
+import { CreatedAt } from "@/components/CreatedAt";
 import type { Command } from "@/components/Board";
 import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
 import { RunControl } from "@/components/RunControl";
@@ -221,22 +222,14 @@ export default function CardDrawer({
 									{wide ? <Minimize2Icon /> : <Maximize2Icon />}
 								</IconButton>
 								{card ? (
-									<Menu
-										trigger={
-											<IconButton label="More actions">
-												<MoreHorizontalIcon />
-											</IconButton>
-										}
-									>
-										<MenuItem onSelect={() => void copyLink()}>
-											<LinkIcon />
-											Copy link
-										</MenuItem>
-										<MenuItem danger onSelect={() => onDelete(card)}>
+									<>
+										<IconButton label="Copy link" onClick={() => void copyLink()}>
+											<CopyIcon />
+										</IconButton>
+										<IconButton label="Delete card" onClick={() => onDelete(card)} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
 											<Trash2Icon />
-											Delete card
-										</MenuItem>
-									</Menu>
+										</IconButton>
+									</>
 								) : null}
 								<IconButton label="Close" onClick={requestClose}>
 									<XIcon />
@@ -267,7 +260,7 @@ export default function CardDrawer({
 										<p className="mt-1 flex items-center gap-2 text-[13px] text-muted-foreground">
 											{card.createdBy ? <MemberAvatar member={card.createdBy} size={20} /> : null}
 											<span>
-												Filed by {card.createdBy?.name ?? "the API"}, {card.age === "just now" ? "just now" : `${card.age} ago`}
+												Filed by {card.createdBy?.name ?? "the API"}, <CreatedAt iso={card.createdAt} age={card.age} phrase />
 											</span>
 										</p>
 									) : null}

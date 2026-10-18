@@ -45,11 +45,6 @@ test("every drawer menu opens in full, and Escape closes the menu before the dra
 	await expect(openMenu(page)).toHaveCount(0);
 	await expect(panel).toBeVisible();
 
-	await panel.getByRole("button", { name: "More actions" }).click();
-	await expectFullyVisible(openMenu(page));
-	await page.keyboard.press("Escape");
-	await expect(panel).toBeVisible();
-
 	await panel.getByRole("button", { name: "Run with a Grok Bot" }).click();
 	await expectFullyVisible(openMenu(page));
 	await page.keyboard.press("Escape");
@@ -85,6 +80,8 @@ test("on a phone the drawer menus and the assignee list fit the screen", async (
 	await openCard(page, title);
 	const panel = drawer(page);
 	await expectFullyVisible(panel.getByRole("button", { name: "Close" }).first());
+	await expectFullyVisible(panel.getByRole("button", { name: "Copy link" }));
+	await expectFullyVisible(panel.getByRole("button", { name: "Delete card" }));
 
 	await panel.getByRole("button", { name: /^Status:/ }).click();
 	await expectFullyVisible(openMenu(page));
@@ -143,6 +140,20 @@ test("a new card with nothing typed closes at once; with a title it asks first",
 	await expect(page.getByRole("alertdialog", { name: "Discard this new card?" })).toBeVisible();
 });
 
+test("the drawer header's copy button copies a link to the card", async ({ page, context, request }) => {
+	const title = `copy ${unique()}`;
+	await tool(request, "create_card", { bot: "Scout", title });
+	await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+	await signIn(page);
+	await openCard(page, title);
+	await drawer(page).getByRole("button", { name: "Copy link" }).click();
+	await expect(page.getByText("Link copied")).toBeVisible();
+	const link = await page.evaluate(() => navigator.clipboard.readText());
+	const id = /\/\?card=([0-9a-f-]{36})$/.exec(link)?.[1];
+	expect(id).toBeTruthy();
+	await expect(page.locator(`[data-card-id="${id}"]`)).toContainText(title);
+});
+
 test("Delete asks before removing the card, from the board and from the drawer", async ({ page, request }) => {
 	const first = `delete one ${unique()}`;
 	const second = `delete two ${unique()}`;
@@ -163,8 +174,7 @@ test("Delete asks before removing the card, from the board and from the drawer",
 	await expect(cardTitled(page, first)).toHaveCount(0);
 
 	await openCard(page, second);
-	await drawer(page).getByRole("button", { name: "More actions" }).click();
-	await page.getByRole("menuitem", { name: /Delete/ }).click();
+	await drawer(page).getByRole("button", { name: "Delete card" }).click();
 	await page.getByRole("alertdialog").getByRole("button", { name: /^Delete/ }).click();
 	await expect(drawer(page)).toHaveCount(0);
 	await expect(cardTitled(page, second)).toHaveCount(0);
