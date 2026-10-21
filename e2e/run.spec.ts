@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cardTitled, columnOf, expectFullyVisible, openMenu, runStatus, signIn, tool, unique } from "./helpers";
+import { cardTitled, columnOf, expectFullyVisible, openMenu, runPicker, runStatus, signIn, tool, unique } from "./helpers";
 
 test("Run on a card with a Bot assignee starts the run at once, with no menu", async ({ page, request }) => {
 	const title = `assigned ${unique()}`;
@@ -7,7 +7,7 @@ test("Run on a card with a Bot assignee starts the run at once, with no menu", a
 	await signIn(page);
 
 	await cardTitled(page, title).getByRole("button", { name: "Run", exact: true }).click();
-	await expect(openMenu(page)).toHaveCount(0);
+	await expect(runPicker(page)).toHaveCount(0);
 	await expect(runStatus(page, title)).toHaveText("Run requested");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Progress/);
 	const queue = await tool(request, "list_run_requests", { bot: "Ops" });
@@ -23,8 +23,8 @@ test("Run on a card with no Bot assignee asks which Bot, drawn above the cards b
 	await signIn(page);
 
 	await cardTitled(page, title).getByRole("button", { name: /Run with a Grok Bot/ }).click();
-	await expectFullyVisible(openMenu(page));
-	await page.getByRole("menuitem", { name: "Scout" }).click();
+	await expectFullyVisible(runPicker(page));
+	await runPicker(page).getByRole("option", { name: "Scout" }).click();
 	await expect(runStatus(page, title)).toHaveText("Run requested");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Progress/);
 });
@@ -39,8 +39,8 @@ test("menus on a card at the bottom of the screen open where every item can be p
 	await card.scrollIntoViewIfNeeded();
 
 	await card.getByRole("button", { name: /Run with a Grok Bot/ }).click();
-	await expectFullyVisible(openMenu(page));
-	await openMenu(page).locator("[role=menuitem]:not([data-disabled])").last().hover();
+	await expectFullyVisible(runPicker(page));
+	await runPicker(page).locator("[role=option]:not([data-disabled=true])").last().hover();
 	await page.keyboard.press("Escape");
 
 	await card.getByRole("button", { name: "Card actions" }).click();

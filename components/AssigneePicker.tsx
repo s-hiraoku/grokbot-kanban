@@ -3,15 +3,17 @@
 import { CheckIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
+import { MemberRow, NoMatch, PickerContent, PickerSearch } from "@/components/MemberSearch";
 import { Button } from "@/components/ui/button";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandGroup, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { searchMembers } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import type { MemberView } from "@/lib/view";
 
 /**
- * GitHub-style assignees: the field lists only who holds the card, and Edit opens a searchable list
- * where each pick toggles one member. The list floats above the drawer, flips to fit the window, and stays
+ * GitHub-style assignees: the field lists only who holds the card, and Edit opens a list, searchable by
+ * name or role, where each pick toggles one member. The list floats above the drawer, flips to fit the window, and stays
  * open so several can be picked in a row.
  */
 export default function AssigneePicker({
@@ -24,6 +26,7 @@ export default function AssigneePicker({
 	onChange: (next: string[]) => void;
 }) {
 	const [open, setOpen] = useState(false);
+	const [query, setQuery] = useState("");
 	const chosen = selected.map((id) => members.find((member) => member.id === id)).filter((member): member is MemberView => Boolean(member));
 	// Selected members first, in assignment order, then everyone else in roster order, as GitHub does.
 	const options = useMemo(
@@ -32,10 +35,17 @@ export default function AssigneePicker({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[members, open],
 	);
+	const shown = searchMembers(options, query);
 	const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]);
 
 	return (
-		<Popover open={open} onOpenChange={setOpen}>
+		<Popover
+			open={open}
+			onOpenChange={(next) => {
+				setOpen(next);
+				if (!next) setQuery("");
+			}}
+		>
 			<div className="grid gap-1.5">
 				<div className="flex items-center justify-between">
 					<p className="text-xs font-bold text-muted-foreground" id="assignees-label">
@@ -71,28 +81,29 @@ export default function AssigneePicker({
 				)}
 			</div>
 
-			<PopoverContent align="end" sideOffset={6} collisionPadding={8} className="flex max-h-(--radix-popover-content-available-height) w-[min(300px,calc(100vw-1rem))] flex-col overflow-hidden p-0" data-slot="assignee-menu">
+			<PickerContent align="end" data-slot="assignee-menu">
 				<p className="border-b px-3 py-2 text-xs font-bold">Assign members</p>
-				<Command className="min-h-0 flex-1">
-					<CommandInput placeholder="Filter members" aria-label="Filter members" lang="ja" />
+				<Command shouldFilter={false} className="min-h-0 flex-1">
+					<PickerSearch value={query} onValueChange={setQuery} label="Search members" />
 					<CommandList className="max-h-80">
-						<CommandEmpty>No member matches.</CommandEmpty>
-						<CommandGroup>
-							{options.map((member) => {
-								const on = selected.includes(member.id);
-								return (
-									<CommandItem key={member.id} value={`${member.name} ${member.id}`} onSelect={() => toggle(member.id)} data-checked={on}>
-										<CheckIcon className={cn("text-primary", on ? "opacity-100" : "opacity-0")} aria-hidden="true" />
-										<MemberAvatar member={member} size={22} />
-										<span className={cn("min-w-0 flex-1 truncate", on && "font-bold")} lang="ja">
-											{member.name}
-										</span>
-										{member.kind === "owner" ? <span className="text-xs text-muted-foreground">owner</span> : null}
-									</CommandItem>
-								);
-							})}
-						</CommandGroup>
-						{selected.length ? (
+						{shown.length ? (
+							<CommandGroup>
+								{shown.map((member) => {
+									const on = selected.includes(member.id);
+									return (
+										<CommandItem key={member.id} value={member.id} onSelect={() => toggle(member.id)} data-checked={on}>
+											<CheckIcon className={cn("text-primary", on ? "opacity-100" : "opacity-0")} aria-hidden="true" />
+											<MemberRow member={member} size={22} bold={on}>
+												{member.kind === "owner" ? <span className="text-xs text-muted-foreground">owner</span> : null}
+											</MemberRow>
+										</CommandItem>
+									);
+								})}
+							</CommandGroup>
+						) : (
+							<NoMatch query={query} what="member" />
+						)}
+						{selected.length && !query.trim() ? (
 							<>
 								<CommandSeparator />
 								<CommandGroup>
@@ -104,7 +115,7 @@ export default function AssigneePicker({
 						) : null}
 					</CommandList>
 				</Command>
-			</PopoverContent>
+			</PickerContent>
 		</Popover>
 	);
 }
