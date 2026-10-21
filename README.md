@@ -4,6 +4,22 @@ A kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get
 
 The board is meant to be served at `kanban.hiraoku.dev`. This repo does not deploy itself.
 
+## Architecture
+
+The owner's browser signs in with a cookie, every Grok Bot calls `/api/mcp` with the shared `BOT_TOKEN`, and both go through `lib/board.ts` to Neon Postgres. The server calls Cursor's API itself when a card is handed to a Cursor agent.
+
+```mermaid
+flowchart LR
+    browser["Owner's browser"] == "cookie (OWNER_PASSWORD)" ==> owner["/ · /api/owner/*"]
+    bots["Grok Bots"] == "Bearer BOT_TOKEN" ==> bot["/api/mcp · /api/bot/cards"]
+    owner --> board["lib/board.ts"]
+    bot --> board
+    board --> neon[("Neon Postgres")]
+    board --> cursor["Cursor cloud agent"]
+```
+
+[docs/architecture.md](docs/architecture.md) has the full diagram, the Run sequence between the coordinating Bot and the others, and a table of every authentication path with what limits it sets for more than one user.
+
 ## Set up
 
 1. Use Node.js 22.
@@ -128,7 +144,7 @@ Title, body, and notes may be Japanese. Column names and other controls stay in 
 
 ## Security
 
-One owner signs in with `OWNER_PASSWORD`. The session cookie is `HttpOnly`, `SameSite=Lax`, and HMAC-signed. It lasts 30 days. Changing the password signs out every session.
+One owner signs in with `OWNER_PASSWORD`. The session cookie is `HttpOnly`, `SameSite=Lax`, and HMAC-signed. It lasts 30 days. Changing the password signs out every session. [docs/architecture.md](docs/architecture.md#authentication-paths) lists every authentication path.
 
 Owner writes also require a same-origin `Origin` header.
 
