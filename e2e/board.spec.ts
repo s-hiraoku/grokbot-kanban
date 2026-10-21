@@ -1,16 +1,37 @@
 import { expect, test } from "@playwright/test";
-import { cardTitled, drawer, openCard, signIn, tool, unique } from "./helpers";
+import { cardTitled, drawer, nextGitHubSignIn, openCard, signIn, tool, unique } from "./helpers";
 
-test("a wrong password is refused with a message, and the right one opens the board", async ({ page, request }) => {
-	await tool(request, "create_card", { bot: "Scout", title: `login ${unique()}` });
-	await page.goto("/login");
-	await expect(page.getByLabel("Password")).toBeFocused();
-	await page.getByLabel("Password").fill("not the password");
-	await page.getByRole("button", { name: /Sign in/ }).click();
-	await expect(page.locator("form").getByRole("alert")).toContainText("did not match");
-	await expect(page.getByLabel("Password")).toHaveAttribute("aria-invalid", "true");
+test("sign-in goes through GitHub, turns away other accounts, and sign-out ends the session", async ({ page, request }) => {
+	const title = `login ${unique()}`;
+	await tool(request, "create_card", { bot: "Scout", title });
+	const signInLink = page.getByRole("link", { name: "Sign in with GitHub" });
+
+	await page.goto("/");
+	await expect(page).toHaveURL(/\/login$/);
+	await nextGitHubSignIn(page, { login: "someone-else", id: 7 });
+	await signInLink.click();
+	await expect(page.getByRole("main").getByRole("alert")).toHaveText("This board belongs to another GitHub account.");
+	await expect(page.getByText(title)).toHaveCount(0);
+
+	await nextGitHubSignIn(page, { deny: true });
+	await signInLink.click();
+	await expect(page.getByRole("main").getByRole("alert")).toHaveText("GitHub sign-in was cancelled.");
+
+	await nextGitHubSignIn(page);
 	await signIn(page);
+	await expect(cardTitled(page, title)).toBeVisible();
+	// Signed in, /login goes straight to the board.
+	await page.goto("/login");
 	await expect(page.getByRole("button", { name: /New card/ })).toBeVisible();
+
+	const session = (await page.context().cookies()).find((cookie) => cookie.name === "kanban_session");
+	expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax" });
+	await page.getByRole("button", { name: "Sign out" }).click();
+	await expect(signInLink).toBeVisible();
+	// The old cookie was ended on the server, so putting it back does not reopen the board.
+	await page.context().addCookies([session!]);
+	await page.goto("/");
+	await expect(page).toHaveURL(/\/login$/);
 });
 
 test("/ jumps to search, which filters the cards, and Escape clears it", async ({ page, request }) => {

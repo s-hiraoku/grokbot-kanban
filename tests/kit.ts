@@ -3,17 +3,19 @@ import { drizzle } from "drizzle-orm/pglite";
 import { openBoard, type BoardHandle, type OwnerCommand } from "@/lib/board";
 import type { CursorClient } from "@/lib/cursor";
 import type { Instant } from "@/lib/domain";
-import { sessionCookie } from "@/lib/auth";
+import { createAccounts, type Accounts, type Db, type GitHubProfile } from "@/lib/accounts";
 import * as schema from "@/lib/schema";
 import { migrationSql } from "@/lib/migrations";
 import { createStore } from "@/lib/store";
 import type { Env } from "@/lib/runtime";
 
-export const PASSWORD = "a".repeat(32);
+export const OWNER_LOGIN = "s-hiraoku";
+export const OWNER_PROFILE: GitHubProfile = { id: 18750282, login: OWNER_LOGIN, name: "Hiraoku", avatarUrl: null };
 export const BOT_TOKEN = "b".repeat(32);
 
 export type TestApp = {
 	board: BoardHandle;
+	accounts: Accounts;
 	env: Env;
 	client: PGlite;
 	setNow: (value: number) => void;
@@ -31,23 +33,30 @@ export async function boot(options: { cursor?: CursorClient } = {}): Promise<Tes
 		now: () => now as Instant,
 		cursor: options.cursor ?? null,
 	});
+	const accounts = createAccounts(db as never as Db);
 	const env: Env = {
 		databaseUrl: "postgres://test",
-		ownerPassword: PASSWORD,
+		githubClientId: "client-id",
+		githubClientSecret: "s".repeat(40),
+		ownerGithubLogin: OWNER_LOGIN,
+		githubWebUrl: null,
+		githubApiUrl: null,
 		botToken: BOT_TOKEN,
 		studioUrl: null,
 		cursorApiKey: options.cursor ? "c".repeat(32) : null,
 		cursorApiUrl: null,
 	};
+	const { token } = await accounts.signIn(OWNER_PROFILE, Date.now());
 	return {
 		board,
+		accounts,
 		env,
 		client,
 		setNow: (value) => {
 			now = value;
 		},
 		now: () => now,
-		cookie: sessionCookie(PASSWORD, Date.now(), false).split(";")[0] ?? "",
+		cookie: `kanban_session=${token}`,
 	};
 }
 

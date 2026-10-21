@@ -14,7 +14,7 @@ The board is meant to be served at `kanban.hiraoku.dev`. This repo does not depl
 6. For Neon, put the pooled connection string in `DATABASE_URL` and run `npm run db:migrate`. It applies every file in `drizzle/` in order, and each file is safe to run again. Run it again after pulling a change that adds a file.
 7. Start the app with `npm run dev` and open http://localhost:3000.
 
-`npm test` uses an in-memory Postgres. It does not need Neon. `npm run test:e2e` builds the app, serves it on port 3210 with an in-memory database, and drives the board in a real browser with Playwright at desktop, laptop, and phone sizes; run `npx playwright install chromium` once first, and stop `npm run dev` before, since both use `.next`.
+`npm test` uses an in-memory Postgres. It does not need Neon. `npm run test:e2e` builds the app, serves it on port 3210 with an in-memory database, and drives the board in a real browser with Playwright at desktop, laptop, and phone sizes, with stand-ins for GitHub sign-in and Cursor; run `npx playwright install chromium` once first, and stop `npm run dev` before, since both use `.next`.
 
 The interface is built with Tailwind CSS and [shadcn/ui](https://ui.shadcn.com) components, which live in `components/ui` as ordinary source files. Add more with `npx shadcn@latest add <name>`.
 
@@ -23,12 +23,22 @@ The interface is built with Tailwind CSS and [shadcn/ui](https://ui.shadcn.com) 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Neon connection string. `pglite` is local only. |
-| `OWNER_PASSWORD` | yes | Sign-in password, at least 32 characters. It also signs the session cookie. |
+| `GITHUB_CLIENT_ID` | yes | Client ID of the GitHub OAuth app you sign in with. |
+| `GITHUB_CLIENT_SECRET` | yes | That app's client secret. |
+| `OWNER_GITHUB_LOGIN` | yes | Your GitHub username. Only this account can sign in. |
 | `BOT_TOKEN` | yes | Bearer token for `/api/bot/cards`, at least 32 characters. |
 | `STUDIO_URL` | no | `https` target of the Studio link. |
 | `CURSOR_API_KEY` | no | Cursor API key, from Cursor Dashboard → Integrations. With it, Run can hand cards to a Cursor cloud agent. |
 
-Generate both secrets with `openssl rand -base64 32`. They must differ from each other and from `CURSOR_API_KEY`.
+Generate `BOT_TOKEN` with `openssl rand -base64 32`. It must differ from `GITHUB_CLIENT_SECRET` and `CURSOR_API_KEY`.
+
+`OWNER_PASSWORD` from earlier versions is no longer used and can be removed.
+
+## Sign-in
+
+You sign in with GitHub. Create an OAuth app under GitHub → Settings → Developer settings → OAuth Apps → New OAuth App. Set **Homepage URL** to the board's address and **Authorization callback URL** to `<board address>/api/auth/github/callback`, for example `https://kanban.hiraoku.dev/api/auth/github/callback`. For local work, make a second app with `http://localhost:3000/api/auth/github/callback`, because an app takes one callback URL. Copy the client ID and a new client secret into the variables above.
+
+The board asks GitHub for no scopes, only your public profile, and uses PKCE and a one-time state, so a sign-in link can't be replayed or started from another site. Only `OWNER_GITHUB_LOGIN` gets in. Another account is turned away and nothing about it is stored. A session lasts 30 days. The cookie holds a random token and the database keeps only its SHA-256 hash in `sessions`. **Sign out** deletes that row, so the cookie stops working even if it was copied. Changing `OWNER_GITHUB_LOGIN` shuts out sessions of the previous account at once.
 
 `CRON_SECRET` from earlier versions is no longer used and can be removed from the Vercel project.
 
@@ -36,7 +46,7 @@ Generate both secrets with `openssl rand -base64 32`. They must differ from each
 
 1. Import this repo as a Vercel project. Framework preset is Next.js.
 2. Add the Neon integration. It writes `DATABASE_URL`.
-3. Set `OWNER_PASSWORD`, `BOT_TOKEN`, and optionally `STUDIO_URL` for Production. Use a separate Neon branch for Preview.
+3. Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `OWNER_GITHUB_LOGIN`, `BOT_TOKEN`, and optionally `STUDIO_URL` for Production. Use a separate Neon branch for Preview.
 4. Run `npm run db:migrate` against that database, or add the same SQL files as Neon migrations. `drizzle/*.sql` is the schema, applied in name order. Do not point a Preview deployment at the production database.
 5. Deploy with `vercel deploy --prod`.
 
@@ -128,7 +138,7 @@ Title, body, and notes may be Japanese. Column names and other controls stay in 
 
 ## Security
 
-One owner signs in with `OWNER_PASSWORD`. The session cookie is `HttpOnly`, `SameSite=Lax`, and HMAC-signed. It lasts 30 days. Changing the password signs out every session.
+The owner signs in with GitHub (see **Sign-in**). The session cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` over HTTPS. It holds a random token that the database keeps only as a hash, so sessions can be ended one by one. All Bots still share `BOT_TOKEN`; a later change gives each user their own board and revocable Bot tokens.
 
 Owner writes also require a same-origin `Origin` header.
 

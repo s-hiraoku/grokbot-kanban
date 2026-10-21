@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /** Serves an icon the owner uploaded. The URL carries a content hash, so the browser can keep it. */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
-	const owner = ownerFromRequest(req, env());
+	const owner = await ownerFromRequest(req, env());
 	if (!owner) return unauthorized();
 	const { id } = await params;
 	const avatar = await getBoard().owner(owner).avatar(decodeURIComponent(id));

@@ -5,6 +5,7 @@ const holder: { current?: TestApp } = {};
 
 vi.mock("@/lib/runtime", () => ({
 	getBoard: () => holder.current!.board,
+	getAccounts: () => holder.current!.accounts,
 	env: () => holder.current!.env,
 }));
 
