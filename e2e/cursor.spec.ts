@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import { FAKE_CURSOR, cardTitled, columnOf, drawer, expectFullyVisible, openCard, openMenu, runStatus, signIn, tool, unique } from "./helpers";
+import { FAKE_CURSOR, cardTitled, columnOf, drawer, expectFullyVisible, openCard, openMenu, runPicker, runStatus, signIn, tool, unique } from "./helpers";
 
 const REPO = { url: "https://github.com/s-hiraoku/shift-log", startingRef: "main" };
 
@@ -16,9 +16,9 @@ test("Run's arrow hands a card to a Cursor agent, which lands in In Review with 
 
 	// With a Bot assigned, Run still goes straight to it; the arrow beside it offers Cursor.
 	await card.getByRole("button", { name: /with another Bot or Cursor/ }).click();
-	await expectFullyVisible(openMenu(page));
-	await expect(openMenu(page).getByRole("menuitem", { name: /Cursor agent/ })).toContainText("Opens a pull request on s-hiraoku/shift-log");
-	await openMenu(page).getByRole("menuitem", { name: /Cursor agent/ }).click();
+	await expectFullyVisible(runPicker(page));
+	await expect(runPicker(page).getByRole("option", { name: /Cursor agent/ })).toContainText("Opens a pull request on s-hiraoku/shift-log");
+	await runPicker(page).getByRole("option", { name: /Cursor agent/ }).click();
 	await expect(runStatus(page, title)).toHaveText("Cursor working");
 	await expect(columnOf(page, title)).toHaveAttribute("aria-label", "In Progress");
 	await expect(page.getByText("Cursor is on it.")).toBeVisible();
@@ -49,13 +49,13 @@ test("Cursor needs the card's repo, and Cursor's refusal comes back as a message
 	await signIn(page);
 
 	await cardTitled(page, bare).getByRole("button", { name: /Run with a Grok Bot or Cursor/ }).click();
-	await expect(openMenu(page).getByRole("menuitem", { name: /Cursor agent/ })).toBeDisabled();
-	await expect(openMenu(page)).toContainText("Set the card's repo under More fields first.");
+	await expect(runPicker(page).getByRole("option", { name: /Cursor agent/ })).toBeDisabled();
+	await expect(runPicker(page)).toContainText("Set the card's repo under More fields first.");
 	await page.keyboard.press("Escape");
 
 	const before = (await launches(request)).length;
 	await cardTitled(page, blocked).getByRole("button", { name: /Run with a Grok Bot or Cursor/ }).click();
-	await openMenu(page).getByRole("menuitem", { name: /Cursor agent/ }).click();
+	await runPicker(page).getByRole("option", { name: /Cursor agent/ }).click();
 	await expect(page.getByText("Repository not accessible (repo_access)")).toBeVisible();
 	await expect(columnOf(page, blocked)).toHaveAttribute("aria-label", "Inbox");
 	await expect(cardTitled(page, blocked).getByRole("button", { name: /Run with a Grok Bot or Cursor/ })).toBeVisible();
@@ -67,7 +67,7 @@ test("the Cursor badge cancels the agent and the card goes back to Todo", async 
 	await tool(request, "create_card", { bot: "Scout", title, repo: REPO });
 	await signIn(page);
 	await cardTitled(page, title).getByRole("button", { name: /Run with a Grok Bot or Cursor/ }).click();
-	await openMenu(page).getByRole("menuitem", { name: /Cursor agent/ }).click();
+	await runPicker(page).getByRole("option", { name: /Cursor agent/ }).click();
 	await expect(runStatus(page, title)).toHaveText("Cursor working");
 
 	await cardTitled(page, title).getByRole("button", { name: "A Cursor agent is working on this card" }).click();

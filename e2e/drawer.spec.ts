@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cardTitled, drawer, expectFullyVisible, openCard, openMenu, signIn, tool, unique } from "./helpers";
+import { cardTitled, drawer, expectFullyVisible, openCard, openMenu, runPicker, signIn, tool, unique } from "./helpers";
 
 test("a click reads the card in the drawer; New card and Edit open the dialog", async ({ page, request }) => {
 	const title = `open me ${unique()}`;
@@ -46,7 +46,7 @@ test("every drawer menu opens in full, and Escape closes the menu before the dra
 	await expect(panel).toBeVisible();
 
 	await panel.getByRole("button", { name: "Run with a Grok Bot" }).click();
-	await expectFullyVisible(openMenu(page));
+	await expectFullyVisible(runPicker(page));
 	await page.keyboard.press("Escape");
 	await expect(panel).toBeVisible();
 
@@ -57,7 +57,7 @@ test("every drawer menu opens in full, and Escape closes the menu before the dra
 	await edit.click();
 	const picker = page.locator('[data-slot="assignee-menu"]');
 	await expectFullyVisible(picker);
-	const search = picker.getByRole("combobox", { name: "Filter members" });
+	const search = picker.getByRole("combobox", { name: "Search members" });
 	await expect(search).toBeFocused();
 	await search.fill("ech");
 	await page.keyboard.press("Enter");
