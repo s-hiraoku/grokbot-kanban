@@ -4,6 +4,22 @@ A kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get
 
 The board is meant to be served at `kanban.hiraoku.dev`. This repo does not deploy itself.
 
+## Architecture
+
+The owner signs in with GitHub and the browser keeps a session cookie, every Grok Bot calls `/api/mcp` with the shared `BOT_TOKEN`, and both go through `lib/board.ts` to Neon Postgres. The server calls Cursor's API itself when a card is handed to a Cursor agent.
+
+```mermaid
+flowchart LR
+    browser["Owner's browser"] == "session cookie (GitHub sign-in)" ==> owner["/ · /api/owner/*"]
+    bots["Grok Bots"] == "Bearer BOT_TOKEN" ==> bot["/api/mcp · /api/bot/cards"]
+    owner --> board["lib/board.ts"]
+    bot --> board
+    board --> neon[("Neon Postgres")]
+    board --> cursor["Cursor cloud agent"]
+```
+
+[docs/architecture.md](docs/architecture.md) has the full diagram, the Run sequence between the coordinating Bot and the others, and a table of every authentication path with what limits it sets for more than one user.
+
 ## Set up
 
 1. Use Node.js 22.
@@ -138,7 +154,7 @@ Title, body, and notes may be Japanese. Column names and other controls stay in 
 
 ## Security
 
-The owner signs in with GitHub (see **Sign-in**). The session cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` over HTTPS. It holds a random token that the database keeps only as a hash, so sessions can be ended one by one. All Bots still share `BOT_TOKEN`; a later change gives each user their own board and revocable Bot tokens.
+The owner signs in with GitHub (see **Sign-in**). The session cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` over HTTPS. It holds a random token that the database keeps only as a hash, so sessions can be ended one by one. All Bots still share `BOT_TOKEN`; a later change gives each user their own board and revocable Bot tokens. [docs/architecture.md](docs/architecture.md#authentication-paths) lists every authentication path.
 
 Owner writes also require a same-origin `Origin` header.
 
