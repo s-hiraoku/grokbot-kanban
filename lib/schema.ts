@@ -1,4 +1,4 @@
-import { integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const cards = pgTable("cards", {
 	id: uuid("id").primaryKey(),
@@ -28,4 +28,21 @@ export const bots = pgTable("bots", {
 	color: text("color").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 	lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+});
+
+export const users = pgTable("users", {
+	id: uuid("id").primaryKey(),
+	githubId: bigint("github_id", { mode: "number" }).notNull(),
+	login: text("login").notNull(),
+	name: text("name"),
+	avatarUrl: text("avatar_url"),
+	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+	lastSignInAt: timestamp("last_sign_in_at", { withTimezone: true }).notNull(),
+});
+
+export const sessions = pgTable("sessions", {
+	tokenHash: text("token_hash").primaryKey(),
+	userId: uuid("user_id").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });

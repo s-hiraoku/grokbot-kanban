@@ -1,4 +1,4 @@
-import { createHmac, createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 // Symbol.for keeps capabilities equal when Next loads this module once per route bundle.
 const capability: unique symbol = Symbol.for("grokbot-kanban.capability") as never;
@@ -22,11 +22,25 @@ export function isBot(value: Bot): boolean {
 	return value[capability] === BOT;
 }
 
-export const SESSION_COOKIE = "kanban_owner";
-const MAX_AGE = 30 * 24 * 60 * 60;
+export const SESSION_COOKIE = "kanban_session";
+/** Holds the OAuth state and PKCE verifier between leaving for GitHub and coming back. */
+export const SIGN_IN_COOKIE = "kanban_sign_in";
+export const SESSION_DAYS = 30;
+const MAX_AGE = SESSION_DAYS * 24 * 60 * 60;
+const SIGN_IN_MAX_AGE = 10 * 60;
 
-export function checkPassword(candidate: string, expected: string): boolean {
-	return safeEqual(candidate, expected);
+/** A fresh random secret, for session tokens, OAuth state, and PKCE verifiers. */
+export function randomToken(): string {
+	return randomBytes(32).toString("base64url");
+}
+
+/** Sessions are stored by this hash, so a leaked database row cannot be replayed as a cookie. */
+export function hashToken(token: string): string {
+	return createHash("sha256").update(token).digest("hex");
+}
+
+export function pkceChallenge(verifier: string): string {
+	return createHash("sha256").update(verifier).digest("base64url");
 }
 
 export function bearerMatches(header: string | null, expected: string): boolean {
@@ -36,40 +50,43 @@ export function bearerMatches(header: string | null, expected: string): boolean 
 	return safeEqual(match[1], expected);
 }
 
-export function sessionCookie(password: string, nowMs: number, secure: boolean): string {
-	const expiresAt = Math.floor(nowMs / 1000) + MAX_AGE;
-	const mac = sign(password, expiresAt);
-	const secureFlag = secure ? "; Secure" : "";
-	return `${SESSION_COOKIE}=v1.${expiresAt}.${mac}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${MAX_AGE}${secureFlag}`;
+export function sessionCookie(token: string, secure: boolean): string {
+	return cookie(SESSION_COOKIE, token, MAX_AGE, secure);
 }
 
 export function clearedSessionCookie(secure: boolean): string {
-	const secureFlag = secure ? "; Secure" : "";
-	return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}`;
+	return cookie(SESSION_COOKIE, "", 0, secure);
 }
 
-export function readSession(token: string | undefined, password: string, nowMs: number): boolean {
-	if (!token) return false;
-	const parts = token.split(".");
-	if (parts.length !== 3 || parts[0] !== "v1") return false;
-	const expiresAt = Number(parts[1]);
-	if (!Number.isFinite(expiresAt) || expiresAt * 1000 <= nowMs) return false;
-	const expected = sign(password, expiresAt);
-	if (expected.length !== parts[2].length) return false;
-	return timingSafeEqual(Buffer.from(expected), Buffer.from(parts[2]));
+export function signInCookie(state: string, verifier: string, secure: boolean): string {
+	return cookie(SIGN_IN_COOKIE, `${state}.${verifier}`, SIGN_IN_MAX_AGE, secure);
 }
 
-export function tokenFromCookie(header: string | null): string | undefined {
+export function clearedSignInCookie(secure: boolean): string {
+	return cookie(SIGN_IN_COOKIE, "", 0, secure);
+}
+
+/** The verifier saved when sign-in started, if the state GitHub sent back is the one we sent. */
+export function verifierFor(saved: string | undefined, state: string | null): string | null {
+	if (!saved || !state) return null;
+	const [expected, verifier] = saved.split(".");
+	if (!expected || !verifier || !safeEqual(state, expected)) return null;
+	return verifier;
+}
+
+export function tokenFromCookie(header: string | null, name: string = SESSION_COOKIE): string | undefined {
 	if (!header) return undefined;
 	for (const part of header.split(";")) {
-		const [name, ...rest] = part.trim().split("=");
-		if (name === SESSION_COOKIE) return rest.join("=");
+		const [key, ...rest] = part.trim().split("=");
+		if (key === name) return rest.join("=") || undefined;
 	}
 	return undefined;
 }
 
-function sign(password: string, expiresAt: number): string {
-	return createHmac("sha256", password).update(`v1.${expiresAt}`).digest("base64url");
+// SameSite=Lax lets the session ride along when GitHub redirects back, and keeps it off cross-site posts.
+function cookie(name: string, value: string, maxAge: number, secure: boolean): string {
+	const secureFlag = secure ? "; Secure" : "";
+	return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secureFlag}`;
 }
 
 function safeEqual(candidate: string, expected: string): boolean {

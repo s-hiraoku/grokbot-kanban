@@ -1,6 +1,7 @@
-import { bearerMatches, clearedSessionCookie, mintBot, mintOwner, readSession, sessionCookie, tokenFromCookie, type Bot, type Owner } from "./auth";
+import type { User } from "./accounts";
+import { bearerMatches, mintBot, mintOwner, tokenFromCookie, type Bot, type Owner } from "./auth";
 import { BadRequest } from "./parse";
-import type { Env } from "./runtime";
+import { getAccounts, type Env } from "./runtime";
 
 type RouteContext = { params: Promise<Record<string, string>> };
 
@@ -57,15 +58,23 @@ export function requestIsSecure(req: Request): boolean {
 	return new URL(req.url).protocol === "https:";
 }
 
-export function ownerFromRequest(req: Request, env: Env, now = Date.now()): Owner | null {
-	const token = tokenFromCookie(req.headers.get("cookie"));
-	if (!readSession(token, env.ownerPassword, now)) return null;
-	return mintOwner();
+/** The signed-in user, from the session cookie. */
+export async function userFromRequest(req: Request, now = Date.now()): Promise<User | null> {
+	return getAccounts().userFor(tokenFromCookie(req.headers.get("cookie")), now);
 }
 
-export function requireOwner(req: Request, env: Env): Owner | Response {
+/** Until each user has a board of their own, only the owner's GitHub account may use this one. */
+export function isOwnerAccount(user: User | null, env: Env): user is User {
+	return user !== null && user.login.toLowerCase() === env.ownerGithubLogin.toLowerCase();
+}
+
+export async function ownerFromRequest(req: Request, env: Env, now = Date.now()): Promise<Owner | null> {
+	return isOwnerAccount(await userFromRequest(req, now), env) ? mintOwner() : null;
+}
+
+export async function requireOwner(req: Request, env: Env): Promise<Owner | Response> {
 	if (!sameOrigin(req)) return forbidden();
-	const owner = ownerFromRequest(req, env);
+	const owner = await ownerFromRequest(req, env);
 	if (!owner) return unauthorized();
 	return owner;
 }
@@ -74,13 +83,3 @@ export function requireBot(req: Request, env: Env): Bot | Response {
 	if (!bearerMatches(req.headers.get("authorization"), env.botToken)) return unauthorized();
 	return mintBot();
 }
-
-export function loginCookie(env: Env, req: Request): string {
-	return sessionCookie(env.ownerPassword, Date.now(), requestIsSecure(req));
-}
-
-export function logoutCookie(req: Request): string {
-	return clearedSessionCookie(requestIsSecure(req));
-}
-
-export type { RouteContext };

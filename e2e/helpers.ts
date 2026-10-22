@@ -1,6 +1,5 @@
 import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
-export const OWNER_PASSWORD = "e2e-owner-password-0123456789abcdefghij";
 export const BOT_TOKEN = "e2e-bot-token-0123456789abcdefghijklmnopq";
 
 /** Calls an MCP tool as a Grok Bot would. */
@@ -16,8 +15,7 @@ export async function tool(request: APIRequestContext, name: string, args: Recor
 
 export async function signIn(page: Page) {
 	await page.goto("/login");
-	await page.fill("input[name=password]", OWNER_PASSWORD);
-	await page.click("button[type=submit]");
+	await page.getByRole("link", { name: "Sign in with GitHub" }).click();
 	await page.waitForSelector("[data-card-id]");
 	// The board is server-rendered; wait for React to take over before clicking.
 	await page.waitForFunction(() => {
@@ -72,6 +70,11 @@ export const openMenu = (page: Page) => page.locator('[role="menu"][data-state="
 
 /** Run's list of Bots and Cursor that is open now. */
 export const runPicker = (page: Page) => page.locator('[data-slot="run-picker"][data-state="open"]');
+
+/** Who the stand-in GitHub (e2e/fake-github.mjs) signs this page in as next; with nothing given, the owner. */
+export async function nextGitHubSignIn(page: Page, as: { login?: string; id?: number; deny?: boolean } = {}) {
+	await page.context().addCookies([{ name: "fake_github_as", value: encodeURIComponent(JSON.stringify(as)), domain: "localhost", path: "/" }]);
+}
 
 /** The stand-in Cursor API the tests run against (e2e/fake-cursor.mjs). */
 export const FAKE_CURSOR = "http://localhost:3299";

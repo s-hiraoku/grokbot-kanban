@@ -10,7 +10,7 @@ export const maxDuration = 60;
 
 export async function POST(req: Request): Promise<Response> {
 	const config = env();
-	const owner = requireOwner(req, config);
+	const owner = await requireOwner(req, config);
 	if (owner instanceof Response) return owner;
 	try {
 		const command = toCommand(parseBody(ownerCommandSchema, await readJson(req)));
