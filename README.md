@@ -2,7 +2,7 @@
 
 A kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, annotate, and move cards over MCP or HTTP. Only you delete cards.
 
-The board is meant to be served at `kanban.hiraoku.dev`. This repo does not deploy itself.
+The board is meant to be served at `grok-bot-kanban.hiraoku.dev`. This repo does not deploy itself.
 
 ## Architecture
 
@@ -52,7 +52,7 @@ Generate `BOT_TOKEN` with `openssl rand -base64 32`. It must differ from `GITHUB
 
 ## Sign-in
 
-You sign in with GitHub. Create an OAuth app under GitHub → Settings → Developer settings → OAuth Apps → New OAuth App. Set **Homepage URL** to the board's address and **Authorization callback URL** to `<board address>/api/auth/github/callback`, for example `https://kanban.hiraoku.dev/api/auth/github/callback`. For local work, make a second app with `http://localhost:3000/api/auth/github/callback`, because an app takes one callback URL. Copy the client ID and a new client secret into the variables above.
+You sign in with GitHub. Create an OAuth app under GitHub → Settings → Developer settings → OAuth Apps → New OAuth App. Set **Homepage URL** to the board's address and **Authorization callback URL** to `<board address>/api/auth/github/callback`, for example `https://grok-bot-kanban.hiraoku.dev/api/auth/github/callback`. For local work, make a second app with `http://localhost:3000/api/auth/github/callback`, because an app takes one callback URL. Copy the client ID and a new client secret into the variables above.
 
 The board asks GitHub for no scopes, only your public profile, and uses PKCE and a one-time state, so a sign-in link can't be replayed or started from another site. Only `OWNER_GITHUB_LOGIN` gets in. Another account is turned away and nothing about it is stored. A session lasts 30 days. The cookie holds a random token and the database keeps only its SHA-256 hash in `sessions`. **Sign out** deletes that row, so the cookie stops working even if it was copied. Changing `OWNER_GITHUB_LOGIN` shuts out sessions of the previous account at once.
 
@@ -68,9 +68,11 @@ The board asks GitHub for no scopes, only your public profile, and uses PKCE and
 
 ## Custom domain
 
-1. In the Vercel project, open Domains and add `kanban.hiraoku.dev`.
-2. At the DNS host for `hiraoku.dev`, add the record Vercel shows. For a subdomain that is usually a `CNAME` from `kanban` to `cname.vercel-dns.com`.
+1. In the Vercel project, open Domains and add `grok-bot-kanban.hiraoku.dev`.
+2. At the DNS host for `hiraoku.dev`, add the record Vercel shows. For a subdomain that is usually a `CNAME` from `grok-bot-kanban` to `cname.vercel-dns.com`.
 3. Wait until Vercel reports the domain as valid. HTTPS is issued by Vercel.
+
+When you move the board to another domain, the GitHub OAuth app's callback URL and every Grok Bot connector's `/api/mcp` URL have to move with it. Keep the old domain attached until the Bots work on the new one, because a connector may not follow a redirect on POST.
 
 ## Using the board
 
@@ -135,7 +137,7 @@ Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` 
 Add `X-Bot-Name` with the bot's name, URL-encoded if it is not ASCII, to record who filed or edited a card. `assignees` takes bot names, `owner`, and `me` for the caller.
 
 ```bash
-curl -X POST https://kanban.hiraoku.dev/api/bot/cards \
+curl -X POST https://grok-bot-kanban.hiraoku.dev/api/bot/cards \
   -H "Authorization: Bearer $BOT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"externalId":"x-1849","title":"音声が6秒で途切れる","body":"キャラクターの返答が途中で止まる","source":"x","originalLink":"https://x.com/i/status/1849","kind":{"type":"voice","seconds":6},"repo":{"url":"https://github.com/s-hiraoku/grokbot","startingRef":"main"}}'
@@ -144,7 +146,7 @@ curl -X POST https://kanban.hiraoku.dev/api/bot/cards \
 Create returns `201` with `{ "card": { "id", "column": "inbox", ... } }`. The same `externalId` returns `200` and the existing card.
 
 ```bash
-curl -X PATCH https://kanban.hiraoku.dev/api/bot/cards/$ID \
+curl -X PATCH https://grok-bot-kanban.hiraoku.dev/api/bot/cards/$ID \
   -H "Authorization: Bearer $BOT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"screening":{"by":"grok"},"notes":"スパムではない"}'
