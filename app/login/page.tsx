@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SESSION_COOKIE } from "@/lib/auth";
 import type { SignInError } from "@/lib/github";
-import { isOwnerAccount } from "@/lib/http";
+import { canUseBoard } from "@/lib/http";
 import { env, getAccounts } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +14,12 @@ const MESSAGES: Record<SignInError, string> = {
 	state: "That sign-in link expired or came from somewhere else. Try again.",
 	denied: "GitHub sign-in was cancelled.",
 	github: "GitHub did not confirm the sign-in. Try again in a moment.",
-	not_allowed: "This board belongs to another GitHub account.",
+	not_allowed: "This GitHub account has not been given access yet. Ask the board's owner to add it.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
 	const jar = await cookies();
-	if (isOwnerAccount(await getAccounts().userFor(jar.get(SESSION_COOKIE)?.value, Date.now()), env())) redirect("/");
+	if (canUseBoard(await getAccounts().userFor(jar.get(SESSION_COOKIE)?.value, Date.now()), env())) redirect("/");
 	const { error } = await searchParams;
 	const message = error && error in MESSAGES ? MESSAGES[error as SignInError] : null;
 	return (
@@ -30,7 +30,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 					<CardTitle className="text-base font-normal text-muted-foreground">
 						<h1>Sign in to the board</h1>
 					</CardTitle>
-					<CardDescription>Use the GitHub account this board belongs to.</CardDescription>
+					<CardDescription>Each GitHub account gets a board of its own.</CardDescription>
 				</CardHeader>
 				<CardContent className="grid gap-4">
 					{message ? (

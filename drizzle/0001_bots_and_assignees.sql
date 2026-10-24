@@ -11,4 +11,5 @@ CREATE TABLE IF NOT EXISTS bots (
   last_seen_at timestamptz
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS bots_name ON bots (lower(name));
+-- Bot names are unique per user, and 0003 creates that index. This file once made them unique board-wide,
+-- and since every file is applied again on each migrate, it must not bring that index back.

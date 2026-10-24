@@ -1,12 +1,13 @@
 import { SIGN_IN_COOKIE, clearedSignInCookie, sessionCookie, tokenFromCookie, verifierFor } from "@/lib/auth";
 import { callbackUrl, type SignInError } from "@/lib/github";
+import { isOwnerLogin, mayUseBoard } from "@/lib/access";
 import { requestIsSecure } from "@/lib/http";
 import { env, getAccounts, getGitHub } from "@/lib/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GitHub sends the browser back here. A session starts only for a state we issued and the owner's account. */
+/** GitHub sends the browser back here. A session starts only for a state we issued and an account let in. */
 export async function GET(req: Request): Promise<Response> {
 	const url = new URL(req.url);
 	const secure = requestIsSecure(req);
@@ -26,9 +27,11 @@ export async function GET(req: Request): Promise<Response> {
 		profile = null;
 	}
 	if (!profile) return fail("github");
-	if (profile.login.toLowerCase() !== config.ownerGithubLogin.toLowerCase()) return fail("not_allowed");
+	if (!mayUseBoard(profile.login, config)) return fail("not_allowed");
 
-	const { token } = await getAccounts().signIn(profile, Date.now());
+	const accounts = getAccounts();
+	const { token, user } = await accounts.signIn(profile, Date.now());
+	if (isOwnerLogin(user.login, config)) await accounts.claimUnowned(user.id);
 	return redirect(new URL("/", req.url), [sessionCookie(token, secure), clearedSignInCookie(secure)]);
 }
 

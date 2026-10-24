@@ -14,7 +14,10 @@ export const OWNER_PROFILE: GitHubProfile = { id: 18750282, login: OWNER_LOGIN, 
 export const BOT_TOKEN = "b".repeat(32);
 
 export type TestApp = {
+	/** The owner's board. */
 	board: BoardHandle;
+	/** Any user's board, as getBoard opens it: only the owner's has Cursor. */
+	boardFor: (user: { id: string; login: string }) => BoardHandle;
 	accounts: Accounts;
 	env: Env;
 	client: PGlite;
@@ -28,17 +31,26 @@ export async function boot(options: { cursor?: CursorClient } = {}): Promise<Tes
 	await client.exec(migrationSql());
 	const db = drizzle(client, { schema });
 	let now = Date.parse("2026-10-11T00:00:00.000Z");
-	const board = openBoard({
-		store: createStore(db as never),
-		now: () => now as Instant,
-		cursor: options.cursor ?? null,
-	});
+	const boards = new Map<string, BoardHandle>();
+	const boardFor = (user: { id: string; login: string }) => {
+		let board = boards.get(user.id);
+		if (!board) {
+			board = openBoard({
+				store: createStore(db as never, user.id),
+				now: () => now as Instant,
+				cursor: user.login === OWNER_LOGIN ? (options.cursor ?? null) : null,
+			});
+			boards.set(user.id, board);
+		}
+		return board;
+	};
 	const accounts = createAccounts(db as never as Db);
 	const env: Env = {
 		databaseUrl: "postgres://test",
 		githubClientId: "client-id",
 		githubClientSecret: "s".repeat(40),
 		ownerGithubLogin: OWNER_LOGIN,
+		allowedGithubLogins: [],
 		githubWebUrl: null,
 		githubApiUrl: null,
 		botToken: BOT_TOKEN,
@@ -46,9 +58,10 @@ export async function boot(options: { cursor?: CursorClient } = {}): Promise<Tes
 		cursorApiKey: options.cursor ? "c".repeat(32) : null,
 		cursorApiUrl: null,
 	};
-	const { token } = await accounts.signIn(OWNER_PROFILE, Date.now());
+	const { token, user } = await accounts.signIn(OWNER_PROFILE, Date.now());
 	return {
-		board,
+		board: boardFor(user),
+		boardFor,
 		accounts,
 		env,
 		client,
