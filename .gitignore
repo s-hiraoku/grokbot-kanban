@@ -8,3 +8,5 @@ coverage
 *.tsbuildinfo
 test-results
 playwright-report
+.next-verify
+.verify
