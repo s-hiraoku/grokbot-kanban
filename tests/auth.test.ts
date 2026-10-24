@@ -17,7 +17,7 @@ const fakeGitHub: typeof fetch = async (input, init) => {
 };
 
 vi.mock("@/lib/runtime", () => ({
-	getBoard: () => holder.current!.board,
+	getBoard: (user: { id: string; login: string }) => holder.current!.boardFor(user),
 	getAccounts: () => holder.current!.accounts,
 	getGitHub: () => createGitHubOAuth({ clientId: "client-id", clientSecret: holder.current!.env.githubClientSecret, fetch: fakeGitHub }),
 	env: () => holder.current!.env,

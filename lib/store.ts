@@ -158,20 +158,22 @@ const contentSchema = z.object({
 
 const idleInbox: CardState = { kind: "idle", column: "inbox", last: null, botRun: null, cursorRun: null };
 
-export function createStore(db: QueryDb): Store {
+/** The store of one user's board. Every read and write is limited to that user's rows. */
+export function createStore(db: QueryDb, userId: string): Store {
+	const mine = (table: typeof cards | typeof bots, ...conditions: unknown[]) => and(eq(table.userId, userId), ...(conditions as never[]));
 	return {
 		async all() {
-			const rows = await db.select().from(cards);
+			const rows = await db.select().from(cards).where(mine(cards));
 			return rows.map(readCard).sort((a, b) => Number(a.rank) - Number(b.rank) || a.id.localeCompare(b.id));
 		},
 		async get(id) {
-			const rows = await db.select().from(cards).where(eq(cards.id, id));
+			const rows = await db.select().from(cards).where(mine(cards, eq(cards.id, id)));
 			const row = rows[0];
 			return row ? readCard(row) : null;
 		},
 		async insert(row) {
 			if (row.externalId) {
-				const existing = await findExternal(db, row.externalId);
+				const existing = await findExternal(db, userId, row.externalId);
 				if (existing) return { card: existing, created: false };
 			}
 			try {
@@ -179,6 +181,7 @@ export function createStore(db: QueryDb): Store {
 					.insert(cards)
 					.values(contentValues(row.content, {
 						id: crypto.randomUUID(),
+						userId,
 						createdAt: new Date(row.now),
 						externalId: row.externalId,
 						createdBy: row.createdBy,
@@ -192,14 +195,14 @@ export function createStore(db: QueryDb): Store {
 				return { card: readCard(created), created: true };
 			} catch (error) {
 				if (row.externalId && pgCode(error) === "23505") {
-					const existing = await findExternal(db, row.externalId);
+					const existing = await findExternal(db, userId, row.externalId);
 					if (existing) return { card: existing, created: false };
 				}
 				throw error;
 			}
 		},
 		async patchContent(id, patch) {
-			const current = await db.select().from(cards).where(eq(cards.id, id));
+			const current = await db.select().from(cards).where(mine(cards, eq(cards.id, id)));
 			const row = current[0];
 			if (!row) return null;
 			const content = readContent(row);
@@ -207,7 +210,7 @@ export function createStore(db: QueryDb): Store {
 			const updated = await db
 				.update(cards)
 				.set(contentColumns(next))
-				.where(eq(cards.id, id))
+				.where(mine(cards, eq(cards.id, id)))
 				.returning();
 			const written = updated[0];
 			return written ? readCard(written) : null;
@@ -220,20 +223,20 @@ export function createStore(db: QueryDb): Store {
 					rank: next.rank,
 					stateVersion: sql`${cards.stateVersion} + 1`,
 				})
-				.where(and(eq(cards.id, id), eq(cards.stateVersion, expectedVersion)))
+				.where(mine(cards, eq(cards.id, id), eq(cards.stateVersion, expectedVersion)))
 				.returning();
 			return updated.length === 0 ? "conflict" : "written";
 		},
 		async writeRank(id, rank) {
-			const updated = await db.update(cards).set({ rank }).where(eq(cards.id, id)).returning();
+			const updated = await db.update(cards).set({ rank }).where(mine(cards, eq(cards.id, id))).returning();
 			return updated.length > 0;
 		},
 		async bots() {
-			const rows = await db.select().from<BotRow>(bots);
+			const rows = await db.select().from<BotRow>(bots).where(mine(bots));
 			return rows.map(readBot).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 		},
 		async bot(id) {
-			const rows = await db.select().from<BotRow>(bots).where(eq(bots.id, id));
+			const rows = await db.select().from<BotRow>(bots).where(mine(bots, eq(bots.id, id)));
 			return rows[0] ? readBot(rows[0]) : null;
 		},
 		async ensureBot(profile) {
@@ -241,6 +244,7 @@ export function createStore(db: QueryDb): Store {
 				.insert(bots)
 				.values({
 					id: profile.id,
+					userId,
 					name: profile.name,
 					role: profile.role,
 					avatar: profile.avatar,
@@ -250,7 +254,7 @@ export function createStore(db: QueryDb): Store {
 				})
 				.onConflictDoNothing()
 				.returning<BotRow>();
-			const rows = await db.select().from<BotRow>(bots).where(eq(bots.id, profile.id));
+			const rows = await db.select().from<BotRow>(bots).where(mine(bots, eq(bots.id, profile.id)));
 			if (!rows[0]) throw new Error("bot insert returned no row");
 			return readBot(rows[0]);
 		},
@@ -262,15 +266,15 @@ export function createStore(db: QueryDb): Store {
 			if (patch.color !== undefined) values.color = patch.color;
 			if (patch.lastSeenAt !== undefined) values.lastSeenAt = new Date(patch.lastSeenAt);
 			if (Object.keys(values).length === 0) return this.bot(id);
-			const rows = await db.update(bots).set(values).where(eq(bots.id, id)).returning<BotRow>();
+			const rows = await db.update(bots).set(values).where(mine(bots, eq(bots.id, id))).returning<BotRow>();
 			return rows[0] ? readBot(rows[0]) : null;
 		},
 		async deleteBot(id) {
-			const rows = await db.delete(bots).where(eq(bots.id, id)).returning();
+			const rows = await db.delete(bots).where(mine(bots, eq(bots.id, id))).returning();
 			return rows.length > 0;
 		},
 		async deleteCard(id) {
-			const rows = await db.delete(cards).where(eq(cards.id, id)).returning();
+			const rows = await db.delete(cards).where(mine(cards, eq(cards.id, id))).returning();
 			return rows.length > 0;
 		},
 	};
@@ -288,8 +292,8 @@ function readBot(row: BotRow): BotProfile {
 	};
 }
 
-async function findExternal(db: QueryDb, externalId: string): Promise<Card | null> {
-	const rows = await db.select().from(cards).where(eq(cards.externalId, externalId));
+async function findExternal(db: QueryDb, userId: string, externalId: string): Promise<Card | null> {
+	const rows = await db.select().from(cards).where(and(eq(cards.userId, userId), eq(cards.externalId, externalId)));
 	const row = rows[0];
 	return row ? readCard(row) : null;
 }
@@ -298,6 +302,7 @@ function contentValues(
 	content: CardContent,
 	meta: {
 		id: string;
+		userId: string;
 		createdAt: Date;
 		externalId: string | null;
 		createdBy: MemberId | null;

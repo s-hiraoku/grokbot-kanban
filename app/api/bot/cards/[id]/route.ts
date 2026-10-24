@@ -11,22 +11,22 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function GET(req: Request, context: Context): Promise<Response> {
 	const config = env();
-	const bot = requireBot(req, config);
+	const bot = await requireBot(req, config);
 	if (bot instanceof Response) return bot;
 	const { id } = await context.params;
-	const card = await getBoard().bot(bot).get(id as CardId);
+	const card = await getBoard(bot.user).bot(bot.cap).get(id as CardId);
 	if (!card) return notFound();
 	return json({ card });
 }
 
 export async function PATCH(req: Request, context: Context): Promise<Response> {
 	const config = env();
-	const bot = requireBot(req, config);
+	const bot = await requireBot(req, config);
 	if (bot instanceof Response) return bot;
 	const { id } = await context.params;
 	try {
 		const patch = brandPatch(parseBody(contentPatchSchema, await readJson(req)));
-		const card = await getBoard().bot(bot).patch(id as CardId, patch, botNameFrom(req));
+		const card = await getBoard(bot.user).bot(bot.cap).patch(id as CardId, patch, botNameFrom(req));
 		if (!card) return notFound();
 		return json({ card });
 	} catch (error) {
