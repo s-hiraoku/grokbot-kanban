@@ -1,4 +1,4 @@
-import { bigint, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const cards = pgTable("cards", {
 	id: uuid("id").primaryKey(),
@@ -38,6 +38,12 @@ export const users = pgTable("users", {
 	avatarUrl: text("avatar_url"),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 	lastSignInAt: timestamp("last_sign_in_at", { withTimezone: true }).notNull(),
+});
+
+export const boardRevision = pgTable("board_revision", {
+	id: boolean("id").primaryKey(),
+	revision: bigint("revision", { mode: "number" }).notNull(),
+	cursorRuns: integer("cursor_runs").notNull(),
 });
 
 export const sessions = pgTable("sessions", {

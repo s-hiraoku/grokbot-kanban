@@ -1,5 +1,6 @@
+import type { Owner } from "@/lib/auth";
 import type { OwnerCommand } from "@/lib/board";
-import { badRequest, json, readJson, requireOwner } from "@/lib/http";
+import { badRequest, boardEtag, json, readJson, requireOwner } from "@/lib/http";
 import { BadRequest, brandContent, brandPatch, ownerCommandSchema, parseBody } from "@/lib/parse";
 import { env, getBoard } from "@/lib/runtime";
 import type { CardId } from "@/lib/domain";
@@ -15,14 +16,19 @@ export async function POST(req: Request): Promise<Response> {
 	try {
 		const command = toCommand(parseBody(ownerCommandSchema, await readJson(req)));
 		const result = await getBoard().owner(owner).execute(command);
-		if (result.error === "not_found") return json({ error: "not_found", board: result.board, notice: "That card or bot no longer exists. The board was refreshed." }, 404);
-		if (result.error === "busy") return json({ error: "busy", notice: "Someone else changed this card at the same moment. Try again." }, 503);
-		if (result.error === "bad_request") return json({ error: "bad_request", board: result.board, notice: result.notice }, 400);
-		return json({ board: result.board, notice: result.notice });
+		if (result.error === "not_found") return reply(owner, { error: "not_found", board: result.board, notice: "That card or bot no longer exists. The board was refreshed." }, 404);
+		if (result.error === "busy") return reply(owner, { error: "busy", notice: "Someone else changed this card at the same moment. Try again." }, 503);
+		if (result.error === "bad_request") return reply(owner, { error: "bad_request", board: result.board, notice: result.notice }, 400);
+		return reply(owner, { board: result.board, notice: result.notice }, 200);
 	} catch (error) {
 		if (error instanceof BadRequest) return badRequest();
 		throw error;
 	}
+}
+
+async function reply(owner: Owner, body: unknown, status: number): Promise<Response> {
+	const revision = await getBoard().owner(owner).revision();
+	return json(body, status, { ETag: boardEtag(revision) });
 }
 
 function toCommand(raw: ReturnType<typeof ownerCommandSchema.parse>): OwnerCommand {

@@ -2,24 +2,26 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { BotProfile, BotProfilePatch } from "./bots";
 import type { BotRun, Card, CardContent, CardId, CardState, Column, ContentPatch, CursorRun, HttpsUrl, Instant, MemberId, PastRun } from "./domain";
-import { bots, cards } from "./schema";
+import { boardRevision, bots, cards } from "./schema";
+
+type Table = typeof cards | typeof bots | typeof boardRevision;
 
 type QueryDb = {
 	select: () => {
-		from: <R = Row>(table: typeof cards | typeof bots) => Promise<R[]> & { where: (condition: unknown) => Promise<R[]> };
+		from: <R = Row>(table: Table) => Promise<R[]> & { where: (condition: unknown) => Promise<R[]> };
 	};
-	insert: (table: typeof cards | typeof bots) => {
+	insert: (table: Table) => {
 		values: (value: Record<string, unknown>) => {
 			returning: <R = Row>() => Promise<R[]>;
 			onConflictDoNothing: () => { returning: <R = Row>() => Promise<R[]> };
 		};
 	};
-	update: (table: typeof cards | typeof bots) => {
+	update: (table: Table) => {
 		set: (value: Record<string, unknown>) => {
 			where: (condition: unknown) => { returning: <R = Row>() => Promise<R[]> };
 		};
 	};
-	delete: (table: typeof cards | typeof bots) => { where: (condition: unknown) => { returning: <R = Row>() => Promise<R[]> } };
+	delete: (table: Table) => { where: (condition: unknown) => { returning: <R = Row>() => Promise<R[]> } };
 };
 
 type BotRow = {
@@ -77,6 +79,7 @@ export type Store = {
 	updateBot(id: string, patch: BotProfilePatch & { lastSeenAt?: Instant }): Promise<BotProfile | null>;
 	deleteBot(id: string): Promise<boolean>;
 	deleteCard(id: CardId): Promise<boolean>;
+	stamp(): Promise<{ revision: string; cursorRuns: number }>;
 };
 
 const columnSchema = z.enum(["inbox", "todo", "inProgress", "inReview", "done", "wontDo"]);
@@ -158,6 +161,20 @@ const contentSchema = z.object({
 
 const idleInbox: CardState = { kind: "idle", column: "inbox", last: null, botRun: null, cursorRun: null };
 
+type RevisionRow = { revision: number | string; cursorRuns: number };
+
+async function touchRevision(db: QueryDb): Promise<void> {
+	const running = await db.select().from(cards).where(sql`jsonb_typeof(${cards.state}->'cursorRun') = 'object'`);
+	await db
+		.update(boardRevision)
+		.set({
+			revision: sql`${boardRevision.revision} + 1`,
+			cursorRuns: running.length,
+		})
+		.where(eq(boardRevision.id, true))
+		.returning();
+}
+
 export function createStore(db: QueryDb): Store {
 	return {
 		async all() {
@@ -189,6 +206,7 @@ export function createStore(db: QueryDb): Store {
 					.returning();
 				const created = inserted[0];
 				if (!created) throw new Error("insert returned no row");
+				await touchRevision(db);
 				return { card: readCard(created), created: true };
 			} catch (error) {
 				if (row.externalId && pgCode(error) === "23505") {
@@ -210,7 +228,9 @@ export function createStore(db: QueryDb): Store {
 				.where(eq(cards.id, id))
 				.returning();
 			const written = updated[0];
-			return written ? readCard(written) : null;
+			if (!written) return null;
+			await touchRevision(db);
+			return readCard(written);
 		},
 		async writeState(id, expectedVersion, next) {
 			const updated = await db
@@ -222,11 +242,15 @@ export function createStore(db: QueryDb): Store {
 				})
 				.where(and(eq(cards.id, id), eq(cards.stateVersion, expectedVersion)))
 				.returning();
-			return updated.length === 0 ? "conflict" : "written";
+			if (updated.length === 0) return "conflict";
+			await touchRevision(db);
+			return "written";
 		},
 		async writeRank(id, rank) {
 			const updated = await db.update(cards).set({ rank }).where(eq(cards.id, id)).returning();
-			return updated.length > 0;
+			if (updated.length === 0) return false;
+			await touchRevision(db);
+			return true;
 		},
 		async bots() {
 			const rows = await db.select().from<BotRow>(bots);
@@ -237,7 +261,7 @@ export function createStore(db: QueryDb): Store {
 			return rows[0] ? readBot(rows[0]) : null;
 		},
 		async ensureBot(profile) {
-			await db
+			const inserted = await db
 				.insert(bots)
 				.values({
 					id: profile.id,
@@ -250,6 +274,7 @@ export function createStore(db: QueryDb): Store {
 				})
 				.onConflictDoNothing()
 				.returning<BotRow>();
+			if (inserted.length > 0) await touchRevision(db);
 			const rows = await db.select().from<BotRow>(bots).where(eq(bots.id, profile.id));
 			if (!rows[0]) throw new Error("bot insert returned no row");
 			return readBot(rows[0]);
@@ -263,15 +288,27 @@ export function createStore(db: QueryDb): Store {
 			if (patch.lastSeenAt !== undefined) values.lastSeenAt = new Date(patch.lastSeenAt);
 			if (Object.keys(values).length === 0) return this.bot(id);
 			const rows = await db.update(bots).set(values).where(eq(bots.id, id)).returning<BotRow>();
+			const heartbeat = Object.keys(values).length === 1 && values.lastSeenAt !== undefined;
+			if (rows[0] && !heartbeat) await touchRevision(db);
 			return rows[0] ? readBot(rows[0]) : null;
 		},
 		async deleteBot(id) {
 			const rows = await db.delete(bots).where(eq(bots.id, id)).returning();
-			return rows.length > 0;
+			if (rows.length === 0) return false;
+			await touchRevision(db);
+			return true;
 		},
 		async deleteCard(id) {
 			const rows = await db.delete(cards).where(eq(cards.id, id)).returning();
-			return rows.length > 0;
+			if (rows.length === 0) return false;
+			await touchRevision(db);
+			return true;
+		},
+		async stamp() {
+			const rows = await db.select().from<RevisionRow>(boardRevision);
+			const row = rows[0];
+			if (!row) throw new Error("board_revision is missing");
+			return { revision: String(row.revision), cursorRuns: Number(row.cursorRuns) };
 		},
 	};
 }

@@ -6,7 +6,7 @@ How the board is put together as of October 2026, with the authentication paths 
 
 ```mermaid
 flowchart LR
-    browser["Owner's browser<br/>Next.js UI · React 19<br/>syncs every 15 s"]
+    browser["Owner's browser<br/>Next.js UI · React 19<br/>visible tab syncs every 10 min"]
     subgraph grok["Grok Bot (xAI) · one shared connector"]
         kanbanBot["Kanban Bot<br/>(coordinator)"]
         otherBots["Other Bots × N"]
@@ -65,7 +65,7 @@ sequenceDiagram
     Note over B: Running
     T->>B: 6. finish_run done / review / blocked
     Note over B: Done / In Review / Todo
-    B-->>O: 7. shown on the next 15 s sync
+    B-->>O: 7. shown on the next sync, within 10 min
 ```
 
 Step 3 happens inside Grok Bot, so the board only knows about it through the `pass_run` record. Requests for the Kanban Bot itself go straight to steps 5 and 6. Steps 2 to 6 all use the same `BOT_TOKEN`, and each Bot names itself with the `bot` argument.
