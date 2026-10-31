@@ -23,6 +23,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronLeftIcon, ChevronRightIcon, LogOutIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { MemberAvatar } from "@/components/Avatar";
+import { useTickingNow } from "@/components/CreatedAt";
 import BotsPanel from "@/components/BotsPanel";
 import CardDrawer from "@/components/CardDrawer";
 import CardPanel, { type CardHandlers } from "@/components/CardPanel";
@@ -34,9 +35,10 @@ import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { COLUMNS, type Column, type ParkColumn } from "@/lib/domain";
+import { pollWait } from "@/lib/poll";
 import { OFFLINE_TOAST, ONLINE_TOAST, UNREACHABLE_TOAST, commandToast, type ToastMessage } from "@/lib/notify";
 import { cn } from "@/lib/utils";
-import type { BoardView, BotView, CardView, MemberView } from "@/lib/view";
+import { seenText, type BoardView, type BotView, type CardView, type MemberView } from "@/lib/view";
 
 export type Command =
 	| { type: "create"; content: Record<string, unknown> }
@@ -94,6 +96,7 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 	const [order, setOrder] = useState<Order>(() => orderOf(initial));
 	const notify = useCallback((message: ToastMessage) => showToast(message), []);
 	const offline = useRef(0);
+	const etag = useRef<string | null>(null);
 	// A click on a card reads it in the side drawer; New card and Edit open the large dialog to write in.
 	// The last target stays set after closing, so the drawer can animate out with its content.
 	const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
@@ -185,12 +188,21 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 
 	const refresh = useCallback(async () => {
 		try {
-			const response = await fetch("/api/owner/sync", { method: "POST" });
+			const headers = new Headers();
+			if (etag.current) headers.set("If-None-Match", etag.current);
+			const response = await fetch("/api/owner/sync", { method: "POST", headers });
 			if (response.status === 401) {
 				window.location.href = "/login";
 				return;
 			}
+			if (response.status === 304) {
+				if (offline.current >= 2) notify(ONLINE_TOAST);
+				offline.current = 0;
+				return;
+			}
 			if (!response.ok) throw new Error(String(response.status));
+			const tag = response.headers.get("ETag");
+			if (tag) etag.current = tag;
 			accept((await response.json()) as BoardView);
 			if (offline.current >= 2) notify(ONLINE_TOAST);
 			offline.current = 0;
@@ -201,18 +213,37 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 		}
 	}, [accept, notify]);
 
-	// Poll so bot edits show up without a reload.
+	const cursorRunning = board.columns.some((column) => column.cards.some((card) => card.cursor));
+
 	useEffect(() => {
-		const timer = window.setInterval(() => {
-			if (document.visibilityState === "visible") void refresh();
-		}, 15000);
-		const onFocus = () => void refresh();
-		window.addEventListener("focus", onFocus);
-		return () => {
+		let timer = 0;
+		const stop = () => {
 			window.clearInterval(timer);
-			window.removeEventListener("focus", onFocus);
+			timer = 0;
 		};
-	}, [refresh]);
+		const arm = () => {
+			stop();
+			const wait = pollWait(document.visibilityState === "visible", cursorRunning);
+			if (wait === null) return;
+			timer = window.setInterval(() => {
+				void refresh();
+			}, wait);
+		};
+		const onVisibility = () => {
+			if (document.visibilityState !== "visible") {
+				stop();
+				return;
+			}
+			void refresh();
+			arm();
+		};
+		document.addEventListener("visibilitychange", onVisibility);
+		arm();
+		return () => {
+			stop();
+			document.removeEventListener("visibilitychange", onVisibility);
+		};
+	}, [refresh, cursorRunning]);
 
 	useEffect(() => {
 		const id = new URLSearchParams(window.location.search).get("card");
@@ -265,6 +296,8 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 				window.location.href = "/login";
 				return false;
 			}
+			const tag = response.headers.get("ETag");
+			if (tag) etag.current = tag;
 			const payload = (await response.json().catch(() => ({}))) as { board?: BoardView; notice?: string | null };
 			if (payload.board) accept(payload.board);
 			else if (!response.ok) await refresh();
@@ -635,8 +668,9 @@ export default function Board({ initial, studioUrl }: { initial: BoardView; stud
 /** One face in the dock: filter by it with a click, or drop a card on it to assign that member. */
 function DockMember({ member, load, active, onClick, droppable }: { member: MemberView | BotView; load: number; active: boolean; onClick: () => void; droppable: boolean }) {
 	const { setNodeRef, isOver } = useDroppable({ id: `${MEMBER_DROP}${member.id}`, disabled: !droppable, data: { pinpoint: true } });
+	const now = useTickingNow();
 	const bot = "role" in member ? member : null;
-	const title = bot ? [bot.name, bot.role, bot.lastSeen === null ? "Not seen yet" : bot.lastSeen === "just now" ? "Seen just now" : `Last seen ${bot.lastSeen} ago`].filter(Boolean).join("\n") : "You";
+	const title = bot ? [bot.name, bot.role, seenText(bot, now, "dock")].filter(Boolean).join("\n") : "You";
 	return (
 		<DockButton ref={setNodeRef} active={active} over={isOver} waiting={droppable} onClick={onClick} title={title} load={load} label={member.name} color={member.color}>
 			<MemberAvatar member={member} size={32} />

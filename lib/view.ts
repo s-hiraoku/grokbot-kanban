@@ -24,6 +24,7 @@ export type BotView = MemberView & {
 	assigned: number;
 	created: number;
 	lastSeen: string | null;
+	lastSeenAt: string | null;
 };
 
 export type ColumnView = {
@@ -115,6 +116,7 @@ export function toBotView(bot: BotProfile, cards: readonly Card[], now: number):
 		assigned: cards.filter((card) => card.content.assignees.includes(bot.id)).length,
 		created: cards.filter((card) => card.createdBy === bot.id).length,
 		lastSeen: bot.lastSeenAt === null ? null : ageLabel(bot.lastSeenAt, now),
+		lastSeenAt: bot.lastSeenAt === null ? null : new Date(bot.lastSeenAt).toISOString(),
 	};
 }
 
@@ -260,6 +262,13 @@ function repoLabel(url: string | null): string | null {
 	} catch {
 		return url;
 	}
+}
+
+export function seenText(bot: { lastSeen: string | null; lastSeenAt: string | null }, now: number | null, place: "dock" | "roster"): string {
+	const label = bot.lastSeenAt && now !== null ? ageLabel(Date.parse(bot.lastSeenAt), now) : bot.lastSeen;
+	if (label === null) return "Not seen yet";
+	if (label === "just now") return "Seen just now";
+	return place === "dock" ? `Last seen ${label} ago` : `Seen ${label} ago`;
 }
 
 export function ageLabel(createdAt: number, now: number): string {

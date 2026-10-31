@@ -42,6 +42,12 @@ export const users = pgTable("users", {
 	lastSignInAt: timestamp("last_sign_in_at", { withTimezone: true }).notNull(),
 });
 
+export const boardRevision = pgTable("board_revision", {
+	userId: uuid("user_id").primaryKey(),
+	revision: bigint("revision", { mode: "number" }).notNull(),
+	cursorRuns: integer("cursor_runs").notNull(),
+});
+
 export const sessions = pgTable("sessions", {
 	tokenHash: text("token_hash").primaryKey(),
 	userId: uuid("user_id").notNull(),

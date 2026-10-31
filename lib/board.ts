@@ -64,6 +64,8 @@ export class BoardInputError extends Error {
 
 export type OwnerBoard = {
 	view(): Promise<BoardView>;
+	sync(since: string | null): Promise<{ unchanged: true; revision: string } | { unchanged: false; board: BoardView; revision: string }>;
+	revision(): Promise<string>;
 	execute(command: OwnerCommand): Promise<CommandResult>;
 	/** The stored icon of a bot, for the image route. */
 	avatar(botId: string): Promise<string | null>;
@@ -145,6 +147,17 @@ export function openBoard(deps: BoardDeps): BoardHandle {
 		view: async () => {
 			await reconcile(deps);
 			return viewOf(deps);
+		},
+		revision: async () => (await deps.store.stamp()).revision,
+		sync: async (since) => {
+			const stamp = await deps.store.stamp();
+			if (since !== null && since === stamp.revision && stamp.cursorRuns === 0) {
+				return { unchanged: true, revision: stamp.revision };
+			}
+			await reconcile(deps);
+			const board = await viewOf(deps);
+			const revision = (await deps.store.stamp()).revision;
+			return { unchanged: false, board, revision };
 		},
 		avatar: async (botId) => (await deps.store.bot(botId))?.avatar ?? (botId === OWNER_MEMBER ? DEFAULT_OWNER_AVATAR : null),
 		execute: (command) => execute(deps, command),

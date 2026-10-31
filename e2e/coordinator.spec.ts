@@ -19,7 +19,7 @@ test("the MCP server offers what the coordinating Bot's routine calls", async ({
 	expect(Object.keys((byName.get("list_run_requests") as { inputSchema: { properties: object } }).inputSchema.properties)).toContain("everyone");
 });
 
-test("a run for another Bot goes from Run requested to Running and on to In Review while the board stays open", async ({ page, request }) => {
+test("a run for another Bot reaches Running and In Review after reload", async ({ page, request }) => {
 	const title = `coordinated ${unique()}`;
 	const created = await tool(request, "create_card", { bot: "Director", title, assignees: ["Director"] });
 	await signIn(page);
@@ -36,11 +36,12 @@ test("a run for another Bot goes from Run requested to Running and on to In Revi
 	const again = await tool(request, "list_run_requests", { bot: "Kanban", everyone: true });
 	expect(again.cards.find((card: { id: string }) => card.id === created.card.id).run.passedOnBy).toBe("Kanban");
 
-	// Director picks it up. The open board catches up on its own, with no reload.
 	await tool(request, "start_run", { bot: "Director", card: created.card.id });
-	await expect(runStatus(page, title)).toHaveText("Running", { timeout: 25_000 });
+	await page.reload();
+	await expect(runStatus(page, title)).toHaveText("Running");
 	await tool(request, "finish_run", { bot: "Director", card: created.card.id, outcome: "review", summary: "Done, see notes" });
-	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Review/, { timeout: 25_000 });
+	await page.reload();
+	await expect(columnOf(page, title)).toHaveAttribute("aria-label", /In Review/);
 	await expect(runStatus(page, title)).toHaveCount(0);
 	const after = await tool(request, "list_run_requests", { bot: "Kanban", everyone: true });
 	expect(after.cards.map((card: { id: string }) => card.id)).not.toContain(created.card.id);

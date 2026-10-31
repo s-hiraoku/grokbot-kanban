@@ -10,6 +10,16 @@ export function json(body: unknown, status = 200, headers?: HeadersInit): Respon
 	return Response.json(body, { status, headers });
 }
 
+export function boardEtag(revision: string): string {
+	return `"${revision}"`;
+}
+
+export function revisionFromEtag(header: string | null): string | null {
+	if (!header) return null;
+	const match = /^\s*"(\d+)"\s*$/.exec(header);
+	return match?.[1] ?? null;
+}
+
 export function badRequest(message?: string): Response {
 	return json(message ? { error: "bad_request", message } : { error: "bad_request" }, 400);
 }

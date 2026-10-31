@@ -4,6 +4,7 @@ import { CheckIcon, CopyIcon, PlusIcon, UploadIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
 import { BotTokens } from "@/components/BotTokens";
+import { useTickingNow } from "@/components/CreatedAt";
 import type { Command } from "@/components/Board";
 import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,14 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { ToastMessage } from "@/lib/notify";
-import type { BotView, MemberView } from "@/lib/view";
+import { seenText, type BotView, type MemberView } from "@/lib/view";
 
 const PALETTE = ["#7aa2ff", "#3dd68c", "#e2b340", "#e06c75", "#c678dd", "#56b6c2", "#f0883e", "#a3be8c"];
+
+function BotSeen({ bot }: { bot: BotView }) {
+	const now = useTickingNow();
+	return <span>{seenText(bot, now, "roster")}</span>;
+}
 
 type Draft = { id: string | null; name: string; role: string; avatar: string; color: string; original: string };
 
@@ -134,7 +140,7 @@ export default function BotsPanel({
 										<span className="flex flex-wrap gap-3 text-xs text-faint">
 											<span>{bot.assigned} assigned</span>
 											<span>{bot.created} filed</span>
-											<span>{bot.lastSeen === null ? "Not seen yet" : bot.lastSeen === "just now" ? "Seen just now" : `Seen ${bot.lastSeen} ago`}</span>
+											<BotSeen bot={bot} />
 										</span>
 									</div>
 									<Button

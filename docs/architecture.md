@@ -6,7 +6,7 @@ How the board is put together as of October 2026, with the authentication paths 
 
 ```mermaid
 flowchart LR
-    browser["Owner's browser<br/>Next.js UI · React 19<br/>syncs every 15 s"]
+    browser["Owner's browser<br/>Next.js UI · React 19<br/>visible tab syncs every 10 min"]
     subgraph grok["Grok Bot (xAI) · one shared connector"]
         kanbanBot["Kanban Bot<br/>(coordinator)"]
         otherBots["Other Bots × N"]
@@ -65,7 +65,7 @@ sequenceDiagram
     Note over B: Running
     T->>B: 6. finish_run done / review / blocked
     Note over B: Done / In Review / Todo
-    B-->>O: 7. shown on the next 15 s sync
+    B-->>O: 7. shown on the next sync, within 10 min
 ```
 
 Step 3 happens inside Grok Bot, so the board only knows about it through the `pass_run` record. Requests for the Kanban Bot itself go straight to steps 5 and 6. Steps 2 to 6 all use the board owner's connector token, and each Bot names itself with the `bot` argument.
@@ -75,7 +75,7 @@ Step 3 happens inside Grok Bot, so the board only knows about it through the `pa
 | Path | Used by | Credential | Who is calling | Limits for multi-user |
 | --- | --- | --- | --- | --- |
 | `/api/auth/github`, `/api/auth/github/callback` | Owner | GitHub OAuth with PKCE and a one-time state cookie, no scopes | The GitHub account, recorded in `users` | `OWNER_GITHUB_LOGIN` and `ALLOWED_GITHUB_LOGINS` (or `*`) are let in; the owner takes over rows from before accounts at sign-in. |
-| `/`, `/api/owner/*`, `/api/avatar/*` | Owner | Cookie `kanban_session`: a random token whose SHA-256 is in `sessions`, 30 days. Writes also need a same-origin `Origin` | A user, but routes only get the `Owner` capability | Sessions end one by one on sign-out. The board itself is still one, with no owner column. |
+| `/`, `/api/owner/*`, `/api/avatar/*` | Owner | Cookie `kanban_session`: a random token whose SHA-256 is in `sessions`, 30 days. Writes also need a same-origin `Origin` | A user, but routes only get the `Owner` capability | Sessions end one by one on sign-out. Each session opens that user's board. |
 | `/api/auth/logout` | Owner | Same-origin POST | The session's user | Deletes the session row. |
 | `/api/mcp` | Every Grok Bot | `Authorization: Bearer gbk_…`, a token made on a board; its SHA-256 is in `bot_tokens` | The token's user, then the `bot` argument, self-declared | Bots of one user can still act under each other's names, since Grok Bot connectors are account-wide. They cannot reach another user's board. |
 | `/api/bot/cards` | Bots, scripts | Same tokens | The token's user, then the optional `X-Bot-Name` header | Same as MCP. |
@@ -88,3 +88,4 @@ Step 3 happens inside Grok Bot, so the board only knows about it through the `pa
 - `cards` and `bots` carry `user_id`; external ids, Bot ids, and Bot names are unique per user (`drizzle/0003_boards_per_user.sql`).
 - Rows from before accounts have no user; the owner takes them over at their next sign-in.
 - `getBoard(user)` in `lib/runtime.ts` opens a board for one user, with Cursor only for the owner.
+- `board_revision` is one row per user (`drizzle/0004_board_revision.sql`). A hidden tab does not sync. A visible tab syncs every 10 minutes, or every minute while that board has a Cursor run. Sync returns 304 when that user's revision is unchanged and the board has no Cursor run.
