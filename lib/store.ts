@@ -164,7 +164,6 @@ const contentSchema = z.object({
 
 const idleInbox: CardState = { kind: "idle", column: "inbox", last: null, botRun: null, cursorRun: null };
 
-/** The store of one user's board. Every read and write is limited to that user's rows. */
 export function createStore(db: QueryDb, userId: string): Store {
 	const mine = (table: typeof cards | typeof bots, ...conditions: unknown[]) => and(eq(table.userId, userId), ...(conditions as never[]));
 	const changed = () => touchRevision(db, userId);
