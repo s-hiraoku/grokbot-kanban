@@ -1,17 +1,17 @@
 # grokbot-kanban
 
-A kanban for one owner and a roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, annotate, and move cards over MCP or HTTP. Only you delete cards.
+A kanban for you and your roster of [Grok Bot](https://docs.x.ai/grok-bot/get-started) bots. Bots file, claim, annotate, and move cards over MCP or HTTP. Only you delete cards. Everyone who signs in gets a board of their own, which their own Bots reach with their own tokens.
 
 The board is meant to be served at `grok-bot-kanban.hiraoku.dev`. This repo does not deploy itself.
 
 ## Architecture
 
-The owner signs in with GitHub and the browser keeps a session cookie, every Grok Bot calls `/api/mcp` with the shared `BOT_TOKEN`, and both go through `lib/board.ts` to Neon Postgres. The server calls Cursor's API itself when a card is handed to a Cursor agent.
+The owner signs in with GitHub and the browser keeps a session cookie, every Grok Bot calls `/api/mcp` with a token made on its user's board, and both go through `lib/board.ts` to Neon Postgres. The server calls Cursor's API itself when a card is handed to a Cursor agent.
 
 ```mermaid
 flowchart LR
     browser["Owner's browser"] == "session cookie (GitHub sign-in)" ==> owner["/ · /api/owner/*"]
-    bots["Grok Bots"] == "Bearer BOT_TOKEN" ==> bot["/api/mcp · /api/bot/cards"]
+    bots["Grok Bots"] == "Bearer token (per user)" ==> bot["/api/mcp · /api/bot/cards"]
     owner --> board["lib/board.ts"]
     bot --> board
     board --> neon[("Neon Postgres")]
@@ -41,12 +41,13 @@ The interface is built with Tailwind CSS and [shadcn/ui](https://ui.shadcn.com) 
 | `DATABASE_URL` | yes | Neon connection string. `pglite` is local only. |
 | `GITHUB_CLIENT_ID` | yes | Client ID of the GitHub OAuth app you sign in with. |
 | `GITHUB_CLIENT_SECRET` | yes | That app's client secret. |
-| `OWNER_GITHUB_LOGIN` | yes | Your GitHub username. Only this account can sign in. |
-| `BOT_TOKEN` | yes | Bearer token for `/api/bot/cards`, at least 32 characters. |
+| `OWNER_GITHUB_LOGIN` | yes | Your GitHub username. You can always sign in, you keep the board from before accounts, and only your board gets Cursor. |
+| `ALLOWED_GITHUB_LOGINS` | no | Other GitHub usernames that may sign in, separated by commas, or `*` for anyone with a GitHub account. Empty lets in only you. |
+| `BOT_TOKEN` | no | The old shared Bot token. While set, it opens your board, so connectors made before per-user tokens keep working. Remove it once they use tokens made on the board. |
 | `STUDIO_URL` | no | `https` target of the Studio link. |
 | `CURSOR_API_KEY` | no | Cursor API key, from Cursor Dashboard → Integrations. With it, Run can hand cards to a Cursor cloud agent. |
 
-Generate `BOT_TOKEN` with `openssl rand -base64 32`. It must differ from `GITHUB_CLIENT_SECRET` and `CURSOR_API_KEY`.
+`BOT_TOKEN`, if you still set it, must be at least 32 characters and differ from `GITHUB_CLIENT_SECRET` and `CURSOR_API_KEY`.
 
 `OWNER_PASSWORD` from earlier versions is no longer used and can be removed.
 
@@ -54,7 +55,7 @@ Generate `BOT_TOKEN` with `openssl rand -base64 32`. It must differ from `GITHUB
 
 You sign in with GitHub. Create an OAuth app under GitHub → Settings → Developer settings → OAuth Apps → New OAuth App. Set **Homepage URL** to the board's address and **Authorization callback URL** to `<board address>/api/auth/github/callback`, for example `https://grok-bot-kanban.hiraoku.dev/api/auth/github/callback`. For local work, make a second app with `http://localhost:3000/api/auth/github/callback`, because an app takes one callback URL. Copy the client ID and a new client secret into the variables above.
 
-The board asks GitHub for no scopes, only your public profile, and uses PKCE and a one-time state, so a sign-in link can't be replayed or started from another site. Only `OWNER_GITHUB_LOGIN` gets in. Another account is turned away and nothing about it is stored. A session lasts 30 days. The cookie holds a random token and the database keeps only its SHA-256 hash in `sessions`. **Sign out** deletes that row, so the cookie stops working even if it was copied. Changing `OWNER_GITHUB_LOGIN` shuts out sessions of the previous account at once.
+The board asks GitHub for no scopes, only your public profile, and uses PKCE and a one-time state, so a sign-in link can't be replayed or started from another site. `OWNER_GITHUB_LOGIN` and the accounts in `ALLOWED_GITHUB_LOGINS` get in, each to a board of their own. Another account is turned away and nothing about it is stored. Taking an account out of the list shuts out its sessions and tokens at once, and its board stays in the database. A session lasts 30 days. The cookie holds a random token and the database keeps only its SHA-256 hash in `sessions`. **Sign out** deletes that row, so the cookie stops working even if it was copied. Changing `OWNER_GITHUB_LOGIN` shuts out sessions of the previous account at once.
 
 `CRON_SECRET` from earlier versions is no longer used and can be removed from the Vercel project.
 
@@ -62,7 +63,7 @@ The board asks GitHub for no scopes, only your public profile, and uses PKCE and
 
 1. Import this repo as a Vercel project. Framework preset is Next.js.
 2. Add the Neon integration. It writes `DATABASE_URL`.
-3. Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `OWNER_GITHUB_LOGIN`, `BOT_TOKEN`, and optionally `STUDIO_URL` for Production. Use a separate Neon branch for Preview.
+3. Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `OWNER_GITHUB_LOGIN`, and optionally `ALLOWED_GITHUB_LOGINS` and `STUDIO_URL` for Production. Use a separate Neon branch for Preview.
 4. Run `npm run db:migrate` against that database, or add the same SQL files as Neon migrations. `drizzle/*.sql` is the schema, applied in name order. Do not point a Preview deployment at the production database.
 5. Deploy with `vercel deploy --prod`.
 
@@ -102,9 +103,11 @@ Without `CURSOR_API_KEY`, the Cursor entry in the Run menu stays off and says ho
 
 ## Grok Bot over MCP
 
-`/api/mcp` is a stateless MCP server over Streamable HTTP. It takes `Authorization: Bearer $BOT_TOKEN`, the same token as the bot API. GET and DELETE return `405` because there is no stream or session, but only after the token checks out. A client without the token gets `401` on every method, so a connector error of 405 means the token was accepted.
+`/api/mcp` is a stateless MCP server over Streamable HTTP. It takes `Authorization: Bearer <token>`, with a token made under **Bots & MCP → Connect Grok Bot**, the same token as the bot API. The token decides whose board a call opens. GET and DELETE return `405` because there is no stream or session, but only after the token checks out. A client without the token gets `401` on every method, so a connector error of 405 means the token was accepted.
 
-Grok Bot has no settings form for custom servers. You ask a Bot in chat to add one, and for a server that needs a secret it recommends Remote HTTPS. **Bots & MCP → Connect Grok Bot** on the board has the message to send, with this deployment's URL filled in. When the Bot asks for the key, give the header name `Authorization` and the value `Bearer <BOT_TOKEN>`. Connectors are account-wide in Grok Bot, so one server entry serves every Bot.
+Grok Bot has no settings form for custom servers. You ask a Bot in chat to add one, and for a server that needs a secret it recommends Remote HTTPS. **Bots & MCP → Connect Grok Bot** on the board has the message to send, with this deployment's URL filled in. When the Bot asks for the key, give the header name `Authorization` and the value `Bearer <token>`. Connectors are account-wide in Grok Bot, so one server entry and one token serve every Bot.
+
+Tokens start with `gbk_` and are shown once, when you make them; the board keeps only a SHA-256 hash. The list shows when each one was made and last used (to within 5 minutes). **Revoke** refuses the next call that uses it. A board can have up to 20 tokens.
 
 Because the connector is shared, the board cannot tell Bots apart by token. Every tool takes a `bot` argument instead: the calling Bot's own name. A new name joins the roster with a generated icon. Grok Bot does not share profile images with connectors, so the board cannot pick up a Bot's icon by itself. Upload the image in **Bots & MCP → Roster** (it is cropped to a 128px square), or attach it to the message under **Connect Grok Bot** and let the Bot call `update_my_profile` with a base64 data URL. An emoji or an https image URL also works. Until a Bot has an icon, every tool reply reminds it to send its profile image, so a Bot that can see its picture fixes this on its next call. Uploaded images are served from `/api/avatar/<bot id>` to the signed-in owner. Your own icon is under **Bots & MCP → Roster → Your icon**; it is kept in a reserved `owner` row of the bots table, so no migration is needed, and until you upload one the board shows the default bundled in `lib/ownerAvatar.ts`.
 
@@ -132,13 +135,13 @@ The same endpoint works from the xAI API as a remote MCP tool. Pass `server_url`
 
 ## Bot API
 
-Send `Authorization: Bearer $BOT_TOKEN`. A missing or wrong token returns `401` and writes nothing. The bot can create and edit card content, including `assignees`. The REST API cannot move a card; use the MCP `move_card` tool to move one. A body with any other field returns `400`.
+Send `Authorization: Bearer $TOKEN`, a token made on your board. A missing, wrong, or revoked token returns `401` and writes nothing. The bot can create and edit card content, including `assignees`. The REST API cannot move a card; use the MCP `move_card` tool to move one. A body with any other field returns `400`.
 
 Add `X-Bot-Name` with the bot's name, URL-encoded if it is not ASCII, to record who filed or edited a card. `assignees` takes bot names, `owner`, and `me` for the caller.
 
 ```bash
 curl -X POST https://grok-bot-kanban.hiraoku.dev/api/bot/cards \
-  -H "Authorization: Bearer $BOT_TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"externalId":"x-1849","title":"音声が6秒で途切れる","body":"キャラクターの返答が途中で止まる","source":"x","originalLink":"https://x.com/i/status/1849","kind":{"type":"voice","seconds":6},"repo":{"url":"https://github.com/s-hiraoku/grokbot","startingRef":"main"}}'
 ```
@@ -147,7 +150,7 @@ Create returns `201` with `{ "card": { "id", "column": "inbox", ... } }`. The sa
 
 ```bash
 curl -X PATCH https://grok-bot-kanban.hiraoku.dev/api/bot/cards/$ID \
-  -H "Authorization: Bearer $BOT_TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"screening":{"by":"grok"},"notes":"スパムではない"}'
 ```
@@ -156,7 +159,7 @@ Title, body, and notes may be Japanese. Column names and other controls stay in 
 
 ## Security
 
-The owner signs in with GitHub (see **Sign-in**). The session cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` over HTTPS. It holds a random token that the database keeps only as a hash, so sessions can be ended one by one. All Bots still share `BOT_TOKEN`; a later change gives each user their own board and revocable Bot tokens. [docs/architecture.md](docs/architecture.md#authentication-paths) lists every authentication path.
+The owner signs in with GitHub (see **Sign-in**). The session cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` over HTTPS. It holds a random token that the database keeps only as a hash, so sessions can be ended one by one. Each user's cards and Bots carry their user id, and every query is limited to it, so one board's Bots and pages cannot read or change another's. Bot tokens are per user and revocable. `CURSOR_API_KEY` is the owner's Cursor account, so only the owner's board can start Cursor agents. [docs/architecture.md](docs/architecture.md#authentication-paths) lists every authentication path.
 
 Owner writes also require a same-origin `Origin` header.
 

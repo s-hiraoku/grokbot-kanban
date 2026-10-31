@@ -7,7 +7,7 @@ import { boot, ownerRequest, syncRequest, type TestApp } from "./kit";
 const holder: { current?: TestApp } = {};
 
 vi.mock("@/lib/runtime", () => ({
-	getBoard: () => holder.current!.board,
+	getBoard: (user: { id: string; login: string }) => holder.current!.boardFor(user),
 	getAccounts: () => holder.current!.accounts,
 	env: () => holder.current!.env,
 }));
@@ -92,6 +92,25 @@ test("a Cursor run still returns the board until the run is gone", async () => {
 
 	const quiet = await sync(withEtag(app, landed.headers.get("ETag")));
 	expect(quiet.status).toBe(304);
+});
+
+test("another user's edit leaves this board on 304", async () => {
+	const app = holder.current!;
+	app.env = { ...app.env, allowedGithubLogins: ["alice"] };
+	const { token } = await app.accounts.signIn({ id: 1001, login: "alice", name: "Alice", avatarUrl: null }, Date.now());
+	const alice: TestApp = { ...app, cookie: `kanban_session=${token}` };
+
+	const first = await sync(syncRequest(alice));
+	expect(first.status).toBe(200);
+	const etag = first.headers.get("ETag");
+
+	const created = await command(ownerRequest(app, { type: "create", content: { title: "Owner only" } }));
+	expect(created.status).toBe(200);
+	expect(created.headers.get("ETag")).not.toBe(etag);
+
+	const again = await sync(withEtag(alice, etag));
+	expect(again.status).toBe(304);
+	expect(again.headers.get("ETag")).toBe(etag);
 });
 
 function fakeCursor() {

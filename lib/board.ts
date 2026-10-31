@@ -125,10 +125,13 @@ const OUTCOME: Record<RunOutcome, { column: Column; label: string }> = {
 	blocked: { column: "todo", label: "blocked" },
 };
 
+/** Why Cursor is off. It runs only on the deployment owner's board, since CURSOR_API_KEY is the owner's account. */
+export const CURSOR_OFF = "Cursor is not connected to this board. It runs on the deployment owner's board once CURSOR_API_KEY is set in the environment variables.";
+
 export type BoardDeps = {
 	store: Store;
 	now: () => Instant;
-	/** null when CURSOR_API_KEY is not set; Run then offers Grok Bots only. */
+	/** null when CURSOR_API_KEY is not set or this is not the owner's board; Run then offers Grok Bots only. */
 	cursor?: CursorClient | null;
 };
 
@@ -617,7 +620,7 @@ async function launchCursor(
 	handoff: { by: MemberId; byName: string; instructions: string | null },
 ): Promise<{ card: Card; notice: string } | null> {
 	const cursor = deps.cursor;
-	if (!cursor) throw new BoardInputError("Cursor is not connected. Add CURSOR_API_KEY to the deployment's environment variables and redeploy.");
+	if (!cursor) throw new BoardInputError(CURSOR_OFF);
 	const card = await deps.store.get(cardId);
 	if (!card) return null;
 	const repo = card.content.repo;

@@ -1,6 +1,7 @@
-import type { User } from "./accounts";
+import { BOT_TOKEN_PREFIX, type User } from "./accounts";
 import { bearerMatches, mintBot, mintOwner, tokenFromCookie, type Bot, type Owner } from "./auth";
 import { BadRequest } from "./parse";
+import { mayUseBoard } from "./access";
 import { getAccounts, type Env } from "./runtime";
 
 type RouteContext = { params: Promise<Record<string, string>> };
@@ -73,23 +74,38 @@ export async function userFromRequest(req: Request, now = Date.now()): Promise<U
 	return getAccounts().userFor(tokenFromCookie(req.headers.get("cookie")), now);
 }
 
-/** Until each user has a board of their own, only the owner's GitHub account may use this one. */
-export function isOwnerAccount(user: User | null, env: Env): user is User {
-	return user !== null && user.login.toLowerCase() === env.ownerGithubLogin.toLowerCase();
+/** Whether the signed-in user may use their board: the owner, and whoever ALLOWED_GITHUB_LOGINS lets in. */
+export function canUseBoard(user: User | null, env: Env): user is User {
+	return user !== null && mayUseBoard(user.login, env);
 }
 
-export async function ownerFromRequest(req: Request, env: Env, now = Date.now()): Promise<Owner | null> {
-	return isOwnerAccount(await userFromRequest(req, now), env) ? mintOwner() : null;
+/** A capability with the user whose board it opens. */
+export type Signed<C> = { cap: C; user: User };
+
+export async function ownerFromRequest(req: Request, env: Env, now = Date.now()): Promise<Signed<Owner> | null> {
+	const user = await userFromRequest(req, now);
+	return canUseBoard(user, env) ? { cap: mintOwner(), user } : null;
 }
 
-export async function requireOwner(req: Request, env: Env): Promise<Owner | Response> {
+export async function requireOwner(req: Request, env: Env): Promise<Signed<Owner> | Response> {
 	if (!sameOrigin(req)) return forbidden();
 	const owner = await ownerFromRequest(req, env);
 	if (!owner) return unauthorized();
 	return owner;
 }
 
-export function requireBot(req: Request, env: Env): Bot | Response {
-	if (!bearerMatches(req.headers.get("authorization"), env.botToken)) return unauthorized();
-	return mintBot();
+/**
+ * A Bot call opens the board of the user whose token it carries. The old shared BOT_TOKEN, while it is set,
+ * opens the owner's board.
+ */
+export async function requireBot(req: Request, env: Env, now = Date.now()): Promise<Signed<Bot> | Response> {
+	const header = req.headers.get("authorization");
+	const token = /^Bearer (.+)$/.exec(header ?? "")?.[1];
+	if (!token) return unauthorized();
+	const accounts = getAccounts();
+	let user: User | null = null;
+	if (token.startsWith(BOT_TOKEN_PREFIX)) user = await accounts.userForBotToken(token, now);
+	else if (env.botToken && bearerMatches(header, env.botToken)) user = await accounts.userByLogin(env.ownerGithubLogin);
+	if (!canUseBoard(user, env)) return unauthorized();
+	return { cap: mintBot(), user };
 }

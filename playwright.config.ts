@@ -8,6 +8,7 @@ const FAKE_GITHUB = "http://localhost:3298";
 
 export default defineConfig({
 	testDir: "e2e",
+	globalSetup: "./e2e/global-setup.ts",
 	timeout: 60_000,
 	use: { baseURL: `http://localhost:${PORT}`, viewport: { width: 1440, height: 900 } },
 	webServer: [
@@ -35,6 +36,7 @@ export default defineConfig({
 				GITHUB_CLIENT_ID: "e2e-client-id",
 				GITHUB_CLIENT_SECRET: "e2e-github-secret-0123456789abcdefghijklmn",
 				OWNER_GITHUB_LOGIN: "s-hiraoku",
+				ALLOWED_GITHUB_LOGINS: "alice",
 				GITHUB_WEB_URL: FAKE_GITHUB,
 				GITHUB_API_URL: FAKE_GITHUB,
 				BOT_TOKEN: "e2e-bot-token-0123456789abcdefghijklmnopq",

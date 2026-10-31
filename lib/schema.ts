@@ -1,4 +1,4 @@
-import { bigint, boolean, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const cards = pgTable("cards", {
 	id: uuid("id").primaryKey(),
@@ -18,16 +18,18 @@ export const cards = pgTable("cards", {
 	rank: text("rank").notNull(),
 	state: jsonb("state").notNull(),
 	stateVersion: integer("state_version").notNull(),
+	userId: uuid("user_id"),
 });
 
 export const bots = pgTable("bots", {
-	id: text("id").primaryKey(),
+	id: text("id").notNull(),
 	name: text("name").notNull(),
 	role: text("role").notNull(),
 	avatar: text("avatar"),
 	color: text("color").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 	lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+	userId: uuid("user_id"),
 });
 
 export const users = pgTable("users", {
@@ -41,7 +43,7 @@ export const users = pgTable("users", {
 });
 
 export const boardRevision = pgTable("board_revision", {
-	id: boolean("id").primaryKey(),
+	userId: uuid("user_id").primaryKey(),
 	revision: bigint("revision", { mode: "number" }).notNull(),
 	cursorRuns: integer("cursor_runs").notNull(),
 });
@@ -51,4 +53,13 @@ export const sessions = pgTable("sessions", {
 	userId: uuid("user_id").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 	expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+export const botTokens = pgTable("bot_tokens", {
+	id: uuid("id").primaryKey(),
+	userId: uuid("user_id").notNull(),
+	label: text("label").notNull(),
+	tokenHash: text("token_hash").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+	lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
 });

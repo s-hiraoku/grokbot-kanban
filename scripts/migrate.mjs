@@ -13,7 +13,11 @@ const files = readdirSync(dir).filter((name) => name.endsWith(".sql")).sort();
 
 for (const file of files) {
 	const text = readFileSync(new URL(file, dir), "utf8");
+	// Comment lines go first, so a semicolon in a comment cannot split a statement.
 	const statements = text
+		.split("\n")
+		.filter((line) => !line.trim().startsWith("--"))
+		.join("\n")
 		.split(";")
 		.map((statement) => statement.trim())
 		.filter(Boolean);

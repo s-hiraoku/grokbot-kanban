@@ -14,6 +14,7 @@ type QueryDb = {
 		values: (value: Record<string, unknown>) => {
 			returning: <R = Row>() => Promise<R[]>;
 			onConflictDoNothing: () => { returning: <R = Row>() => Promise<R[]> };
+			onConflictDoUpdate: (config: { target: unknown; set: Record<string, unknown> }) => Promise<unknown>;
 		};
 	};
 	update: (table: Table) => {
@@ -53,6 +54,8 @@ type Row = {
 	state: unknown;
 	stateVersion: number;
 };
+
+type RevisionRow = { revision: number | string; cursorRuns: number };
 
 export type WriteResult = "written" | "conflict";
 
@@ -161,34 +164,23 @@ const contentSchema = z.object({
 
 const idleInbox: CardState = { kind: "idle", column: "inbox", last: null, botRun: null, cursorRun: null };
 
-type RevisionRow = { revision: number | string; cursorRuns: number };
-
-async function touchRevision(db: QueryDb): Promise<void> {
-	const running = await db.select().from(cards).where(sql`jsonb_typeof(${cards.state}->'cursorRun') = 'object'`);
-	await db
-		.update(boardRevision)
-		.set({
-			revision: sql`${boardRevision.revision} + 1`,
-			cursorRuns: running.length,
-		})
-		.where(eq(boardRevision.id, true))
-		.returning();
-}
-
-export function createStore(db: QueryDb): Store {
+/** The store of one user's board. Every read and write is limited to that user's rows. */
+export function createStore(db: QueryDb, userId: string): Store {
+	const mine = (table: typeof cards | typeof bots, ...conditions: unknown[]) => and(eq(table.userId, userId), ...(conditions as never[]));
+	const changed = () => touchRevision(db, userId);
 	return {
 		async all() {
-			const rows = await db.select().from(cards);
+			const rows = await db.select().from(cards).where(mine(cards));
 			return rows.map(readCard).sort((a, b) => Number(a.rank) - Number(b.rank) || a.id.localeCompare(b.id));
 		},
 		async get(id) {
-			const rows = await db.select().from(cards).where(eq(cards.id, id));
+			const rows = await db.select().from(cards).where(mine(cards, eq(cards.id, id)));
 			const row = rows[0];
 			return row ? readCard(row) : null;
 		},
 		async insert(row) {
 			if (row.externalId) {
-				const existing = await findExternal(db, row.externalId);
+				const existing = await findExternal(db, userId, row.externalId);
 				if (existing) return { card: existing, created: false };
 			}
 			try {
@@ -196,6 +188,7 @@ export function createStore(db: QueryDb): Store {
 					.insert(cards)
 					.values(contentValues(row.content, {
 						id: crypto.randomUUID(),
+						userId,
 						createdAt: new Date(row.now),
 						externalId: row.externalId,
 						createdBy: row.createdBy,
@@ -206,18 +199,18 @@ export function createStore(db: QueryDb): Store {
 					.returning();
 				const created = inserted[0];
 				if (!created) throw new Error("insert returned no row");
-				await touchRevision(db);
+				await changed();
 				return { card: readCard(created), created: true };
 			} catch (error) {
 				if (row.externalId && pgCode(error) === "23505") {
-					const existing = await findExternal(db, row.externalId);
+					const existing = await findExternal(db, userId, row.externalId);
 					if (existing) return { card: existing, created: false };
 				}
 				throw error;
 			}
 		},
 		async patchContent(id, patch) {
-			const current = await db.select().from(cards).where(eq(cards.id, id));
+			const current = await db.select().from(cards).where(mine(cards, eq(cards.id, id)));
 			const row = current[0];
 			if (!row) return null;
 			const content = readContent(row);
@@ -225,11 +218,11 @@ export function createStore(db: QueryDb): Store {
 			const updated = await db
 				.update(cards)
 				.set(contentColumns(next))
-				.where(eq(cards.id, id))
+				.where(mine(cards, eq(cards.id, id)))
 				.returning();
 			const written = updated[0];
 			if (!written) return null;
-			await touchRevision(db);
+			await changed();
 			return readCard(written);
 		},
 		async writeState(id, expectedVersion, next) {
@@ -240,24 +233,24 @@ export function createStore(db: QueryDb): Store {
 					rank: next.rank,
 					stateVersion: sql`${cards.stateVersion} + 1`,
 				})
-				.where(and(eq(cards.id, id), eq(cards.stateVersion, expectedVersion)))
+				.where(mine(cards, eq(cards.id, id), eq(cards.stateVersion, expectedVersion)))
 				.returning();
 			if (updated.length === 0) return "conflict";
-			await touchRevision(db);
+			await changed();
 			return "written";
 		},
 		async writeRank(id, rank) {
-			const updated = await db.update(cards).set({ rank }).where(eq(cards.id, id)).returning();
+			const updated = await db.update(cards).set({ rank }).where(mine(cards, eq(cards.id, id))).returning();
 			if (updated.length === 0) return false;
-			await touchRevision(db);
+			await changed();
 			return true;
 		},
 		async bots() {
-			const rows = await db.select().from<BotRow>(bots);
+			const rows = await db.select().from<BotRow>(bots).where(mine(bots));
 			return rows.map(readBot).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 		},
 		async bot(id) {
-			const rows = await db.select().from<BotRow>(bots).where(eq(bots.id, id));
+			const rows = await db.select().from<BotRow>(bots).where(mine(bots, eq(bots.id, id)));
 			return rows[0] ? readBot(rows[0]) : null;
 		},
 		async ensureBot(profile) {
@@ -265,6 +258,7 @@ export function createStore(db: QueryDb): Store {
 				.insert(bots)
 				.values({
 					id: profile.id,
+					userId,
 					name: profile.name,
 					role: profile.role,
 					avatar: profile.avatar,
@@ -274,8 +268,8 @@ export function createStore(db: QueryDb): Store {
 				})
 				.onConflictDoNothing()
 				.returning<BotRow>();
-			if (inserted.length > 0) await touchRevision(db);
-			const rows = await db.select().from<BotRow>(bots).where(eq(bots.id, profile.id));
+			if (inserted.length > 0) await changed();
+			const rows = await db.select().from<BotRow>(bots).where(mine(bots, eq(bots.id, profile.id)));
 			if (!rows[0]) throw new Error("bot insert returned no row");
 			return readBot(rows[0]);
 		},
@@ -287,30 +281,47 @@ export function createStore(db: QueryDb): Store {
 			if (patch.color !== undefined) values.color = patch.color;
 			if (patch.lastSeenAt !== undefined) values.lastSeenAt = new Date(patch.lastSeenAt);
 			if (Object.keys(values).length === 0) return this.bot(id);
-			const rows = await db.update(bots).set(values).where(eq(bots.id, id)).returning<BotRow>();
+			const rows = await db.update(bots).set(values).where(mine(bots, eq(bots.id, id))).returning<BotRow>();
 			const heartbeat = Object.keys(values).length === 1 && values.lastSeenAt !== undefined;
-			if (rows[0] && !heartbeat) await touchRevision(db);
+			if (rows[0] && !heartbeat) await changed();
 			return rows[0] ? readBot(rows[0]) : null;
 		},
 		async deleteBot(id) {
-			const rows = await db.delete(bots).where(eq(bots.id, id)).returning();
+			const rows = await db.delete(bots).where(mine(bots, eq(bots.id, id))).returning();
 			if (rows.length === 0) return false;
-			await touchRevision(db);
+			await changed();
 			return true;
 		},
 		async deleteCard(id) {
-			const rows = await db.delete(cards).where(eq(cards.id, id)).returning();
+			const rows = await db.delete(cards).where(mine(cards, eq(cards.id, id))).returning();
 			if (rows.length === 0) return false;
-			await touchRevision(db);
+			await changed();
 			return true;
 		},
 		async stamp() {
-			const rows = await db.select().from<RevisionRow>(boardRevision);
+			const rows = await db.select().from<RevisionRow>(boardRevision).where(eq(boardRevision.userId, userId));
 			const row = rows[0];
-			if (!row) throw new Error("board_revision is missing");
+			if (!row) return { revision: "0", cursorRuns: 0 };
 			return { revision: String(row.revision), cursorRuns: Number(row.cursorRuns) };
 		},
 	};
+}
+
+async function touchRevision(db: QueryDb, userId: string): Promise<void> {
+	const running = await db
+		.select()
+		.from(cards)
+		.where(and(eq(cards.userId, userId), sql`jsonb_typeof(${cards.state}->'cursorRun') = 'object'`));
+	await db
+		.insert(boardRevision)
+		.values({ userId, revision: 1, cursorRuns: running.length })
+		.onConflictDoUpdate({
+			target: boardRevision.userId,
+			set: {
+				revision: sql`${boardRevision.revision} + 1`,
+				cursorRuns: running.length,
+			},
+		});
 }
 
 function readBot(row: BotRow): BotProfile {
@@ -325,8 +336,8 @@ function readBot(row: BotRow): BotProfile {
 	};
 }
 
-async function findExternal(db: QueryDb, externalId: string): Promise<Card | null> {
-	const rows = await db.select().from(cards).where(eq(cards.externalId, externalId));
+async function findExternal(db: QueryDb, userId: string, externalId: string): Promise<Card | null> {
+	const rows = await db.select().from(cards).where(and(eq(cards.userId, userId), eq(cards.externalId, externalId)));
 	const row = rows[0];
 	return row ? readCard(row) : null;
 }
@@ -335,6 +346,7 @@ function contentValues(
 	content: CardContent,
 	meta: {
 		id: string;
+		userId: string;
 		createdAt: Date;
 		externalId: string | null;
 		createdBy: MemberId | null;

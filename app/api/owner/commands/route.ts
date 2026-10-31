@@ -1,6 +1,6 @@
 import type { Owner } from "@/lib/auth";
 import type { OwnerCommand } from "@/lib/board";
-import { badRequest, boardEtag, json, readJson, requireOwner } from "@/lib/http";
+import { badRequest, boardEtag, json, readJson, requireOwner, type Signed } from "@/lib/http";
 import { BadRequest, brandContent, brandPatch, ownerCommandSchema, parseBody } from "@/lib/parse";
 import { env, getBoard } from "@/lib/runtime";
 import type { CardId } from "@/lib/domain";
@@ -15,7 +15,7 @@ export async function POST(req: Request): Promise<Response> {
 	if (owner instanceof Response) return owner;
 	try {
 		const command = toCommand(parseBody(ownerCommandSchema, await readJson(req)));
-		const result = await getBoard().owner(owner).execute(command);
+		const result = await getBoard(owner.user).owner(owner.cap).execute(command);
 		if (result.error === "not_found") return reply(owner, { error: "not_found", board: result.board, notice: "That card or bot no longer exists. The board was refreshed." }, 404);
 		if (result.error === "busy") return reply(owner, { error: "busy", notice: "Someone else changed this card at the same moment. Try again." }, 503);
 		if (result.error === "bad_request") return reply(owner, { error: "bad_request", board: result.board, notice: result.notice }, 400);
@@ -26,8 +26,8 @@ export async function POST(req: Request): Promise<Response> {
 	}
 }
 
-async function reply(owner: Owner, body: unknown, status: number): Promise<Response> {
-	const revision = await getBoard().owner(owner).revision();
+async function reply(owner: Signed<Owner>, body: unknown, status: number): Promise<Response> {
+	const revision = await getBoard(owner.user).owner(owner.cap).revision();
 	return json(body, status, { ETag: boardEtag(revision) });
 }
 

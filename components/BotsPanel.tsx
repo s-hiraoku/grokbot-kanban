@@ -3,6 +3,7 @@
 import { CheckIcon, CopyIcon, PlusIcon, UploadIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/Avatar";
+import { BotTokens } from "@/components/BotTokens";
 import { useTickingNow } from "@/components/CreatedAt";
 import type { Command } from "@/components/Board";
 import { ConfirmDialog, type ConfirmRequest } from "@/components/ConfirmDialog";
@@ -46,7 +47,7 @@ export default function BotsPanel({
 
 	const mcpUrl = `${origin}/api/mcp`;
 	const grokMessage = `カスタムMCPサーバーを追加してください。名前は kanban、Remote HTTPS で URL は ${mcpUrl} です。
-認証は API キーのヘッダーです。ヘッダー名は Authorization、値は「Bearer <BOT_TOKEN>」です（キーは URL に入れないでください）。
+認証は API キーのヘッダーです。ヘッダー名は Authorization、値は「Bearer <トークン>」です（キーは URL に入れないでください）。
 追加したら tools/list の結果を短く報告してください。以後このカンバンを使うときは、ツールの bot 引数に必ずあなたの Bot 名を入れてください。`;
 	const skillMessage = `「Kanban 運用」という Skill を保存してください。
 - 仕事を始める前に kanban の board_summary を呼び、自分に割り当てられたカードを確認する
@@ -77,7 +78,7 @@ export default function BotsPanel({
   "type": "mcp",
   "server_label": "kanban",
   "server_url": "${mcpUrl}",
-  "authorization": "<BOT_TOKEN>",
+  "authorization": "<token>",
   "allowed_tools": ["board_summary", "list_cards", "get_card"]
 }`;
 
@@ -190,14 +191,15 @@ export default function BotsPanel({
 					<TabsContent value="connect" className="p-5 text-sm leading-relaxed [&_code]:rounded-sm [&_code]:bg-background [&_code]:px-1.5 [&_code]:py-px [&_code]:text-xs">
 						<ol className="mb-4 grid list-decimal gap-3.5 pl-5">
 							<li>
-								Copy the board token from <code>BOT_TOKEN</code> in your deployment settings. Never paste it into a public chat or a shared Bot description.
+								Make a token for the connector and copy it. It opens your board only. Never paste it into a public chat or a shared Bot description, and revoke it here if it leaks.
+								<BotTokens notify={notify} confirm={setConfirm} />
 							</li>
 							<li>
 								In Grok Bot, send this to the Bot that should use the board. It adds a <strong>Remote HTTPS</strong> custom server, which Grok Bot recommends for servers that need a secret.
 								<CopyBlock text={grokMessage} />
 							</li>
 							<li>
-								When it asks for the key, give the header name <code>Authorization</code> and the value <code>Bearer &lt;BOT_TOKEN&gt;</code>. Check it under Settings → Plugins → Yours.
+								When it asks for the key, give the header name <code>Authorization</code> and the value <code>Bearer &lt;token&gt;</code>. Check it under Settings → Plugins → Yours.
 							</li>
 							<li>
 								Optional: save the working rules as a Skill so every Bot uses the board the same way.
