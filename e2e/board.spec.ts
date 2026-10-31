@@ -10,7 +10,7 @@ test("sign-in goes through GitHub, turns away other accounts, and sign-out ends 
 	await expect(page).toHaveURL(/\/login$/);
 	await nextGitHubSignIn(page, { login: "someone-else", id: 7 });
 	await signInLink.click();
-	await expect(page.getByRole("main").getByRole("alert")).toHaveText("This board belongs to another GitHub account.");
+	await expect(page.getByRole("main").getByRole("alert")).toHaveText("This GitHub account has not been given access yet. Ask the board's owner to add it.");
 	await expect(page.getByText(title)).toHaveCount(0);
 
 	await nextGitHubSignIn(page, { deny: true });

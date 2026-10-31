@@ -9,6 +9,6 @@ export async function POST(req: Request): Promise<Response> {
 	const config = env();
 	const owner = await requireOwner(req, config);
 	if (owner instanceof Response) return owner;
-	const board = await getBoard().owner(owner).view();
+	const board = await getBoard(owner.user).owner(owner.cap).view();
 	return json(board);
 }

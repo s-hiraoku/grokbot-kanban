@@ -4,7 +4,7 @@ import { boot, botRequest, cardIn, ownerRequest, syncRequest, type TestApp } fro
 const holder: { current?: TestApp } = {};
 
 vi.mock("@/lib/runtime", () => ({
-	getBoard: () => holder.current!.board,
+	getBoard: (user: { id: string; login: string }) => holder.current!.boardFor(user),
 	getAccounts: () => holder.current!.accounts,
 	env: () => holder.current!.env,
 }));

@@ -14,7 +14,7 @@ export async function POST(req: Request): Promise<Response> {
 	if (owner instanceof Response) return owner;
 	try {
 		const command = toCommand(parseBody(ownerCommandSchema, await readJson(req)));
-		const result = await getBoard().owner(owner).execute(command);
+		const result = await getBoard(owner.user).owner(owner.cap).execute(command);
 		if (result.error === "not_found") return json({ error: "not_found", board: result.board, notice: "That card or bot no longer exists. The board was refreshed." }, 404);
 		if (result.error === "busy") return json({ error: "busy", notice: "Someone else changed this card at the same moment. Try again." }, 503);
 		if (result.error === "bad_request") return json({ error: "bad_request", board: result.board, notice: result.notice }, 400);

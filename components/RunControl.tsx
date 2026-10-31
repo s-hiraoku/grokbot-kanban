@@ -252,7 +252,7 @@ function RunPicker({
 										</span>
 									</CommandItem>
 									{!cursor.enabled ? (
-										<MenuNote>Add CURSOR_API_KEY to the deployment to turn this on.</MenuNote>
+										<MenuNote>Not connected to this board. Cursor runs on the deployment owner&apos;s board once CURSOR_API_KEY is set.</MenuNote>
 									) : !cursor.repo ? (
 										<MenuNote>Set the card&apos;s repo under More fields first.</MenuNote>
 									) : null}

@@ -10,7 +10,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 	const owner = await ownerFromRequest(req, env());
 	if (!owner) return unauthorized();
 	const { id } = await params;
-	const avatar = await getBoard().owner(owner).avatar(decodeURIComponent(id));
+	const avatar = await getBoard(owner.user).owner(owner.cap).avatar(decodeURIComponent(id));
 	if (!avatar || !isAvatarData(avatar)) return notFound();
 	const comma = avatar.indexOf(",");
 	const type = avatar.slice("data:".length, avatar.indexOf(";"));
